@@ -15,3 +15,13 @@ export const createOrderSchema = z.object({
 })
 
 export const idempotencyKeySchema = z.string().min(1);
+
+export const updateOrderStatusSchema =
+  z.object({
+    status: z.enum([
+      "pending",
+      "confirmed",
+      "completed",
+      "cancelled",
+    ]),
+  });
