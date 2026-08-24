@@ -1,10 +1,13 @@
 import * as orderRepository from "../repositories/order.repository.js";
 import * as userClient from "../clients/user-service.client.js";
+import * as inventoryClient from "../clients/inventory-service.client.js";
 import AppError from "../utils/AppError.js";
 import { ORDER_STATUS_TRANSITION } from "../constants/order.constants.js";
-
+import { randomUUID } from "crypto";
 
 export const createOrder = async ({ userId, idempotencyKey, items }) => {
+
+  const eventId = randomUUID();
 
   // 1. Check whether this operation already succeeded
   const existingOrder = await orderRepository.findByIdempotencyKey(idempotencyKey);
@@ -37,23 +40,53 @@ export const createOrder = async ({ userId, idempotencyKey, items }) => {
     0
   );
 
-  // 5. Create order
-  try {
-    return await orderRepository.create({
-      userId,
-      idempotencyKey,
+  let inventoryReserved = false;
 
-      userSnapshot: {
-        userId: user.id || userId,
-        name: user.name,
-        email: user.email,
+  try {
+    await inventoryClient.reserveStock(
+      orderItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+      }))
+    );
+
+    inventoryReserved = true;
+
+    // 5. Create order
+    return await orderRepository.createOrderWithOutbox({
+      orderData: {
+        userId,
+        idempotencyKey,
+        userSnapshot: {
+          name: user.name,
+          email: user.email,
+        },
+        items: orderItems,
+        totalAmount,
+        status: "pending"
       },
 
-      items: orderItems,
-
-      totalAmount,
+      eventData: {
+        eventId,
+        eventType: "OrderCreated",
+        payload: {
+          userId,
+          items: orderItems,
+          totalAmount,
+        },
+      }
     });
   } catch (error) {
+    // If inventory was reserved, release it
+    if (inventoryReserved) {
+      await inventoryClient.releaseStock(
+        orderItems.map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+        }))
+      );
+    }
+
     // MongoDB duplicate-key race
     if (error.code === 11000) {
       const order = await orderRepository.findByIdempotencyKey(idempotencyKey);
@@ -100,3 +133,4 @@ export const updateOrderStatus = async ({ userId, orderId, status }) => {
     status
   });
 };
+

@@ -11,6 +11,8 @@ const requiredEnvVariables = [
   "MONGODB_URI",
   "USER_SERVICE_URL",
   "INTERNAL_SERVICE_TOKEN",
+  "ORDER_SERVICE_URL",
+  "INVENTORY_SERVICE_URL",
 ];
 
 for (const variable of requiredEnvVariables) {
@@ -32,9 +34,9 @@ const env = {
 
   ORDER_SERVICE_URL: process.env.ORDER_SERVICE_URL || "http://localhost:3002",
 
-  INVENTORY_SERVICE_URL: process.env.INVENTORY_SERVICE_URL,
+  INVENTORY_SERVICE_URL: process.env.INVENTORY_SERVICE_URL || "http://localhost:3003",
 
-  RABBITMQ_URL: process.env.RABBITMQ_URL,
+  RABBITMQ_URL: process.env.RABBITMQ_URL || "amqp://localhost:5672",
 };
 
 export default env;
