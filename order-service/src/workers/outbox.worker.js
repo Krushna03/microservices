@@ -1,7 +1,7 @@
 import { publishEvent } from "../messaging/publisher.js";
 import { Outbox } from "../models/outbox.model.js";
 
-const processOutbox = async () => {
+export const processOutbox = async () => {
   const events = await Outbox.find({
     status: 'pending'
   })
@@ -50,4 +50,16 @@ const processOutbox = async () => {
       );
     }
   }
-}
+};
+
+export const startOutboxWorker = (intervalMs = 3000) => {
+  console.log("Starting Order Service Outbox Worker...");
+  setInterval(async () => {
+    try {
+      await processOutbox();
+    } catch (error) {
+      console.error("Outbox worker error:", error);
+    }
+  }, intervalMs);
+};
+

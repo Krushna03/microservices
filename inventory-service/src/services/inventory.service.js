@@ -1,68 +1,89 @@
 import mongoose from "mongoose";
 import * as inventoryRepository from "../repositories/inventory.repository.js";
-import {
-  findProcessedEvent,
-  createProcessedEvent,
-} from "../repositories/event.repository.js";
-import AppError from "../utils/AppError.js";
+import { findProcessedEvent, createProcessedEvent,} from "../repositories/event.repository.js";
+import {Outbox} from "../models/outbox.model.js";
 
-export const processOrderCreated = async (event) => {
+export const reserveInventory = async (event) => {
   const session = await mongoose.startSession();
 
   try {
+    let result;
+
     await session.withTransaction(async () => {
-      const existingEvent = await findProcessedEvent(
-        event.eventId,
-        session
-      );
+      // 1. Idempotency Check
+        const alreadyProcessed = await findProcessedEvent(event.eventId,session);
 
-      if (existingEvent) {
-        return;
-      }
+        if (alreadyProcessed) {
+          console.log(`[Inventory Service] Event already processed: ${event.eventId}`);
+          result = { alreadyProcessed: true, };
+          return;
+        }
 
-      for (const item of event.payload.items) {
-        const inventory = await inventoryRepository.reserveStock(
-          item.productId,
-          item.quantity,
-          session
-        );
+        const { orderId, items } = event.payload;
 
-        if (!inventory) {
-          throw new AppError(
-            `Insufficient stock for ${item.productId}`,
-            400
+        try {
+          // 2. Reserve Inventory
+          await inventoryRepository.reserveInventory(items, session);
+
+          // 3. Create success event
+          await Outbox.create(
+            [
+              {
+                eventId: new mongoose.Types.ObjectId().toString(),
+                eventType:"InventoryReserved",
+                aggregateType:"Inventory",
+                aggregateId: orderId,
+                payload: {
+                  orderId,
+                  items,
+                },
+              },
+            ],
+            {
+              session,
+            }
           );
+
+          // 4. Mark incoming event processed
+          await createProcessedEvent(event,session);
+
+          result = {
+            success: true,
+            orderId,
+          };
+        } catch (error) {
+          // Reservation faile
+          await Outbox.create(
+            [
+              {
+                eventId: new mongoose.Types.ObjectId().toString(),
+                eventType: "InventoryReservationFailed",
+                aggregateType: "Inventory",
+                aggregateId: orderId,
+                payload: {
+                  orderId,
+                  reason: error.message,
+                },
+              },
+            ],
+            {
+              session,
+            }
+          );
+
+          await createProcessedEvent(event,session);
+
+          result = {
+            success: false,
+            orderId,
+            reason: error.message,
+          };
         }
       }
+    );
 
-      await createProcessedEvent(event, session);
-    });
+    return result;
   } finally {
     await session.endSession();
-  }
-};
-
-export const reserveStock = async ({ items }) => {
-  const reservedItems = [];
-
-  for (const item of items) {
-    const inventory = await inventoryRepository.reserveStock(item.productId, item.quantity);
-
-    if (!inventory) {
-      throw new AppError(`Insufficient stock for product ${item.productId}`, 400);
-    }
-
-    reservedItems.push({
-      productId: item.productId,
-      quantity: item.quantity,
-    });
-  }
-
-  return reservedItems;
-};
-
-export const releaseStock = async ({ items }) => {
-  for (const item of items) {
-    await inventoryRepository.releaseStock(item.productId, item.quantity);
   }
 };

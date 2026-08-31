@@ -1,16 +1,17 @@
 import { ProcessedEvent } from "../models/processed-event.model.js";
 
-export const findProcessedEvent = async (eventId, session = null) => {
+export const findProcessedEvent = async (eventId, session) => {
+
   const query = ProcessedEvent.findOne({ eventId });
 
-  if (session) {
-    query.session(session);
-  }
+  if (session) query.session(session);
 
   return query.lean();
 };
 
+
 export const createProcessedEvent = async (event, session) => {
+
   const [processedEvent] = await ProcessedEvent.create(
     [
       {
@@ -18,8 +19,10 @@ export const createProcessedEvent = async (event, session) => {
         eventType: event.eventType,
       },
     ],
-    { session }
+    {
+      session,
+    }
   );
-
+  
   return processedEvent.toObject();
 };

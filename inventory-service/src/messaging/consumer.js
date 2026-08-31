@@ -1,13 +1,11 @@
-import { handleOrderCreated } from "./order.handlers.js";
 import { connectRabbitMQ } from "./rabbitmq.js";
+import { reserveInventory } from "../services/inventory.service.js";
 
 export const startConsumer = async () => {
   const channel = await connectRabbitMQ();
 
-  // Assert Dead Letter Queue (DLQ)
-  await channel.assertQueue("inventory-service.dlq", {
-    durable: true,
-  });
+  // DLQ
+  await channel.assertQueue("inventory-service.dlq", {durable: true});
 
   await channel.bindQueue(
     "inventory-service.dlq",
@@ -15,39 +13,62 @@ export const startConsumer = async () => {
     "inventory.failed"
   );
 
-  // Assert main queue with Dead Letter Exchange settings
+  // Main Queue
   const queue = await channel.assertQueue("inventory-service", {
-    durable: true,
-    arguments: {
-      "x-dead-letter-exchange": "writing.events.dlx",
-      "x-dead-letter-routing-key": "inventory.failed",
-    },
-  });
+      durable: true,
+      arguments: {
+        "x-dead-letter-exchange": "writing.events.dlx",
+        "x-dead-letter-routing-key": "inventory.failed",
+        },
+      }
+    );
 
+  // Event bindings
   await channel.bindQueue(
     queue.queue,
     "writing.events",
     "order.created"
   );
 
-  console.log("Inventory Service listening for 'order.created' events...");
+  await channel.bindQueue(
+    queue.queue,
+    "writing.events",
+    "payment.failed"
+  );
 
+  await channel.prefetch(10);
+
+  console.log("[Inventory Service] Listening for events...");
+
+  // Consumer
   await channel.consume(queue.queue, async (msg) => {
     if (!msg) return;
 
     try {
       const event = JSON.parse(msg.content.toString());
+      const routingKey = msg.fields.routingKey;
 
-      console.log("Event Received:", event.eventType);
+      console.log(`[Inventory Service] Event Received: ${event.eventType} (${routingKey})`);
 
-      await handleOrderCreated(event);
+      if (routingKey === "order.created") {
+        await reserveInventory(event);
+      }
+
+      else if (routingKey === "payment.failed") {
+        // We'll implement this next.
+        console.log("[Inventory Service] Payment failed event received.");
+      }
+
+      else {
+        console.warn(`[Inventory Service] Unhandled event: ${routingKey}`);
+      }
 
       channel.ack(msg);
     } catch (error) {
-      console.error("Event processing failed:", error);
+      console.error("[Inventory Service] Event processing failed:", error);
 
-      // Requeue = false -> routes rejected message to DLQ via x-dead-letter-exchange
       channel.nack(msg, false, false);
     }
-  });
+    }
+  );
 };

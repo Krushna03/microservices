@@ -1,26 +1,28 @@
 import amqp from "amqplib";
-import env from "../config/env";
+import env from "../config/env.js";
 
 let connection;
 let channel;
 
 export const connectRabbitMQ = async () => {
-  connection = await amqp.connect(env.RABBITMQ_URL);
+  if (channel) return channel;
 
+  connection = await amqp.connect(env.RABBITMQ_URL);
   channel = await connection.createChannel();
 
-  console.log("RabbitMQ Connected Successfully")
-}
+  await setupExchange();
 
+  console.log("Order Service RabbitMQ Connected Successfully");
+  return channel;
+};
 
 export const getChannel = () => {
   if (!channel) {
-    throw new Error('RabbitMQ not connected');
+    throw new Error("RabbitMQ not connected");
   }
 
   return channel;
-}
-
+};
 
 // Topic Exchange
 // This is the best exchange for event-driven microservices.

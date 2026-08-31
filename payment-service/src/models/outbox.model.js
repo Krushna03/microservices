@@ -1,0 +1,65 @@
+import mongoose from "mongoose";
+
+const outboxSchema = new mongoose.Schema(
+  {
+    eventId: {
+      type: String,
+      required: true,
+      unique: true,
+      index: true,
+    },
+
+    eventType: {
+      type: String,
+      required: true,
+      index: true,
+    },
+
+    aggregateType: {
+      type: String,
+      required: true,
+    },
+
+    aggregateId: {
+      type: String,
+      required: true,
+      index: true,
+    },
+
+    payload: {
+      type: mongoose.Schema.Types.Mixed,
+      required: true,
+    },
+
+    status: {
+      type: String,
+      enum: [
+        "pending",
+        "published",
+        "failed",
+      ],
+      default: "pending",
+      index: true,
+    },
+
+    attempts: {
+      type: Number,
+      default: 0,
+    },
+
+    publishedAt: {
+      type: Date,
+      default: null,
+    },
+
+    nextAttemptAt: {
+      type: Date,
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+export const Outbox = mongoose.model("Outbox", outboxSchema);

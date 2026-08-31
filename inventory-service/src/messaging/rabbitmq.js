@@ -6,10 +6,15 @@ let channel;
 
 export const connectRabbitMQ = async () => {
   if (channel) return channel;
+
   connection = await amqp.connect(env.RABBITMQ_URL);
+
   channel = await connection.createChannel();
+
   await setupExchange();
+
   console.log("Inventory Service RabbitMQ Connected Successfully");
+  
   return channel;
 };
 
@@ -22,6 +27,7 @@ export const getChannel = () => {
 
 export const setupExchange = async () => {
   const ch = getChannel();
+
   await ch.assertExchange("writing.events", "topic", {
     durable: true,
   });

@@ -16,6 +16,8 @@ export const handleOrderCreated = async (event) => {
         aggregateId: event.aggregateId,
         payload: {
           orderId: event.aggregateId,
+          userId: event.payload.userId,
+          amount: event.payload.totalAmount,
         },
       },
     });
@@ -42,4 +44,24 @@ export const handleOrderCreated = async (event) => {
     // Technical error -> re-throw so consumer handles nack / retry / DLQ
     throw error;
   }
+};
+
+export const handlePaymentFailed = async (event) => {
+  const { orderId } = event.payload;
+
+  await inventoryService.releaseInventory(orderId);
+
+  await publishEvent({
+    routingKey: "inventory.released",
+    event: {
+      eventId: randomUUID(),
+      eventType: "InventoryReleased",
+      occurredAt: new Date().toISOString(),
+      aggregateType: "InventoryReservation",
+      aggregateId: orderId,
+      payload: {
+        orderId,
+      },
+    },
+  });
 };

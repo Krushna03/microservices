@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { reserveStock, releaseStock } from "../controller/inventory.controller";
+import { reserveStock, releaseStock } from "../controller/inventory.controller.js";
 
 const router = Router();
 
