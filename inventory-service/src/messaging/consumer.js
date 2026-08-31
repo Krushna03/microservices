@@ -1,5 +1,5 @@
 import { connectRabbitMQ } from "./rabbitmq.js";
-import { reserveInventory } from "../services/inventory.service.js";
+import { reserveInventory, processPaymentFailed } from "../services/inventory.service.js";
 
 export const startConsumer = async () => {
   const channel = await connectRabbitMQ();
@@ -10,26 +10,27 @@ export const startConsumer = async () => {
   await channel.bindQueue(
     "inventory-service.dlq",
     "writing.events.dlx",
-    "inventory.failed"
+    "inventory.processing.failed"
   );
 
   // Main Queue
   const queue = await channel.assertQueue("inventory-service", {
-      durable: true,
-      arguments: {
-        "x-dead-letter-exchange": "writing.events.dlx",
-        "x-dead-letter-routing-key": "inventory.failed",
-        },
-      }
-    );
+    durable: true,
+    arguments: {
+      "x-dead-letter-exchange": "writing.events.dlx",
+      "x-dead-letter-routing-key": "inventory.processing.failed",
+      },
+    }
+  );
 
-  // Event bindings
+  // Event bindings, order created event will reserve inventory
   await channel.bindQueue(
     queue.queue,
     "writing.events",
     "order.created"
   );
 
+  // PaymentFailed
   await channel.bindQueue(
     queue.queue,
     "writing.events",
@@ -55,8 +56,7 @@ export const startConsumer = async () => {
       }
 
       else if (routingKey === "payment.failed") {
-        // We'll implement this next.
-        console.log("[Inventory Service] Payment failed event received.");
+        await processPaymentFailed(event);
       }
 
       else {
@@ -64,6 +64,7 @@ export const startConsumer = async () => {
       }
 
       channel.ack(msg);
+
     } catch (error) {
       console.error("[Inventory Service] Event processing failed:", error);
 
@@ -71,4 +72,6 @@ export const startConsumer = async () => {
     }
     }
   );
+
+  console.log("[Inventory Service] Consumer started.");
 };

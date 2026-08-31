@@ -3,14 +3,13 @@ import { Outbox } from "../models/outbox.model.js";
 export const createOutboxEvent = async (eventData, session) => {
   const [event] = await Outbox.create([eventData], { session });
 
-  return event;
+  return event.toObject();
 };
 
 
 export const findPendingOutboxEvents = async (limit = 100) => {
   return Outbox.find({
     status: "pending",
-
     $or: [
       { nextAttempt: null },
       { nextAttempt: { $lte: Date.now() } }

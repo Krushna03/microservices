@@ -8,38 +8,42 @@ export const findByOrderId = async (orderId, session = null) => {
       query.session(session);
    }
 
-   return query;
+   return query.lean();
 };
 
 
 export const createPayment = async (paymentData, session) => {
    const [payment] = await Payment.create([paymentData], { session });
 
-   return payment;
+   return payment.toObject();
 }
 
 
 export const makePaymentCompleted = async (paymentId, transactionId, session) => {
 
-  return Payment.findByIdAndUpdate(
+  const payment = await Payment.findByIdAndUpdate(
     paymentId,
     {
       $set: {
         status: "completed",
-        transactionId
+        transactionId,
+        failureReason: null,
       },
     },
     {
       new: true,
-      session
+      session,
+      runValidators: true,
     }
-  );
+  ).lean();
+
+  return payment;
 }
 
 
 export const makePaymentFailed = async (paymentId, reason, session) => {
   
-  return Payment.findByIdAndUpdate(
+  const payment = await Payment.findByIdAndUpdate(
     paymentId,
     {
       $set: {
@@ -49,7 +53,10 @@ export const makePaymentFailed = async (paymentId, reason, session) => {
     },
     {
       new: true,
-      session
+      session,
+      runValidators: true,
     }
-  );
+  ).lean();
+
+  return payment;
 }

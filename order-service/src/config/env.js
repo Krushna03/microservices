@@ -22,7 +22,7 @@ for (const variable of requiredEnvVariables) {
 const env = {
   NODE_ENV: process.env.NODE_ENV || "development",
 
-  PORT: Number(process.env.PORT) || 3002,
+  PORT: Number(process.env.PORT) || 3003,
 
   MONGODB_URI: process.env.MONGODB_URI,
 

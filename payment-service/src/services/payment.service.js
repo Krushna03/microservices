@@ -5,92 +5,110 @@ import { createOutboxEvent } from "../repositories/outbox.repository.js";
 import { findProcessedEvent, createProcessedEvent } from "../repositories/event.repository.js";
 
 export const processInventoryReserved = async (event) => {
-    const session = await mongoose.startSession();
+  const session = await mongoose.startSession();
 
-    try {
-      await session.withTransaction(async () => {
-          // 1. Idempotency check
-          const alreadyProcessed = await findProcessedEvent(event.eventId, session);
+  try {
+    let result;
+    
+    await session.withTransaction(async () => {
+      
+    // 1. Idempotency check
+      const alreadyProcessed = await findProcessedEvent(event.eventId, session);
 
-          if (alreadyProcessed) {
-            return;
-          }
+      if (alreadyProcessed) {
+        console.log("[Payment Service] Event already processed:", event.eventId);
+        result = {
+          alreadyProcessed: true,
+        }
+        return;
+      }
 
-          const {orderId, userId, amount} = event.payload;
+      const {orderId, userId, amount, items} = event.payload;
 
-          // 2. Check whether payment already exists
-          const existingPayment = await findByOrderId(orderId, session);
+      // 2. Check whether payment already exists
+      const existingPayment = await findByOrderId(orderId, session);
 
-          if (existingPayment) {
-            await createProcessedEvent(event, session);
+      if (existingPayment) {
+        await createProcessedEvent(event, session);
 
-            return;
-          }
+        result = {
+          alreadyExists: true,
+          payment: existingPayment,
+        };
 
-          // 3. Create payment
-          const payment = await createPayment(
-            {
+        return;
+      }
+
+      const paymentId = crypto.randomUUID()
+
+      // 3. Create payment
+      const payment = await createPayment(
+        {
+          paymentId,
+          orderId,
+          userId,
+          amount,
+          status: "pending",
+        },
+        session
+      );
+
+      // 4. Simulate payment provider
+      const paymentSuccessful = Math.random() > 0.2;
+
+      if (paymentSuccessful) {
+        const transactionId = crypto.randomUUID();
+
+        await makePaymentCompleted(payment._id, transactionId, session);
+
+        // 5. Create success event
+        await createOutboxEvent(
+          {
+            eventId: crypto.randomUUID(),
+            eventType: "PaymentSucceeded",
+            aggregateType: "Payment",
+            aggregateId: payment._id.toString(),
+            payload: {
               orderId,
               userId,
               amount,
-              status: "pending",
+              paymentId,
+              transactionId,
+              items,
             },
-            session
-          );
+          },
+          session
+        );
+      } else {
+        const reason = "Payment declined";
 
-          // 4. Simulate payment provider
-          const paymentSuccessful = Math.random() > 0.2;
+        await makePaymentFailed(paymentId, reason, session);
 
-          if (paymentSuccessful) {
-            const transactionId = crypto.randomUUID();
+        // 6. Create failure event
+        await createOutboxEvent(
+          {
+            eventId: crypto.randomUUID(),
+            eventType: "PaymentFailed",
+            aggregateType: "Payment",
+            aggregateId: payment._id.toString(),
+            payload: {
+              orderId,
+              userId,
+              amount,
+              reason,
+              paymentId,
+              items,
+            },
+          },
+          session
+        );
+      }
 
-            await makePaymentCompleted(payment._id, transactionId, session);
-
-            // 5. Create success event
-            await createOutboxEvent(
-              {
-                eventId: crypto.randomUUID(),
-                eventType: "PaymentSucceeded",
-                aggregateType: "Payment",
-                aggregateId: payment._id.toString(),
-                payload: {
-                  orderId,
-                  userId,
-                  amount,
-                  transactionId,
-                },
-              },
-              session
-            );
-          } else {
-            const reason = "Payment declined";
-
-            await makePaymentFailed(payment._id, reason, session);
-
-            // 6. Create failure event
-            await createOutboxEvent(
-              {
-                eventId: crypto.randomUUID(),
-                eventType: "PaymentFailed",
-                aggregateType: "Payment",
-                aggregateId: payment._id.toString(),
-                payload: {
-                  orderId,
-                  userId,
-                  amount,
-                  reason,
-                },
-              },
-              session
-            );
-          }
-
-          // 7. Mark incoming event processed
-          await createProcessedEvent(event, session);
-        }
-      );
-    }
-    finally {
-      await session.endSession();
-    }
-  };
+      // 7. Mark incoming event processed
+      await createProcessedEvent(event, session);
+    });
+  }
+  finally {
+    await session.endSession();
+  }
+};

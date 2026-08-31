@@ -7,7 +7,7 @@ export const findProcessedEvent = async (eventId, session) => {
     query.session(session);
   }
 
-  return query;
+  return query.lean();
 };
 
 export const createProcessedEvent = async (event, session) => {
@@ -21,5 +21,5 @@ export const createProcessedEvent = async (event, session) => {
     { session }
   );
 
-  return processedEvent;
+  return processedEvent.toObject();
 };
