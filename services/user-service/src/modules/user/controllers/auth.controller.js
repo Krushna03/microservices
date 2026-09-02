@@ -1,5 +1,5 @@
 import * as authService from "../services/auth.service.js";
-import { toUserResponse } from "../../user/mappers/user.mapper.js";
+import { toUserResponse } from "../mappers/user.mapper.js";
 
 export const login = async (req, res, next) => {
   try {

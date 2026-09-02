@@ -1,6 +1,6 @@
 import bcrypt from "bcrypt";
 
-import * as userRepository from "../../user/repositories/user.repository.js";
+import * as userRepository from "../repositories/user.repository.js";
 import { generateAccessToken } from "../../../utils/jwt.js";
 import AppError from "../../../utils/AppError.js";
 
