@@ -35,7 +35,9 @@ const env = {
 
   LOG_LEVEL: process.env.LOG_LEVEL || "info",
 
-  CORS_ORIGIN: process.env.CORS_ORIGIN
+  CORS_ORIGIN: process.env.CORS_ORIGIN,
+
+  INTERNAL_SERVICE_TOKEN: process.env.INTERNAL_SERVICE_TOKEN || "order-service-secret",
 };
 
 export default env;

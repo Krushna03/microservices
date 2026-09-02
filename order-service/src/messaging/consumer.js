@@ -12,7 +12,7 @@ export const startConsumer = async () => {
   await channel.bindQueue(
     "order-service.dlq",
     "writing.events.dlx",
-    "order.failed"
+    "order.processing.failed"
   );
 
   // Assert main queue
@@ -20,23 +20,25 @@ export const startConsumer = async () => {
     durable: true,
     arguments: {
       "x-dead-letter-exchange": "writing.events.dlx",
-      "x-dead-letter-routing-key": "order.failed",
+      "x-dead-letter-routing-key": "order.processing.failed",
     },
   });
 
-  // Bind queue to Saga events
+  // Bind queue to Saga events, payment Succeed
   await channel.bindQueue(
     queue.queue,
     "writing.events",
     "payment.succeeded"
   );
 
+  // Inventory Released
   await channel.bindQueue(
     queue.queue,
     "writing.events",
     "inventory.released"
   );
 
+  // Inventory Reservation Failed
   await channel.bindQueue(
     queue.queue,
     "writing.events",
@@ -71,9 +73,14 @@ export const startConsumer = async () => {
       }
 
       channel.ack(msg);
+
     } catch (error) {
       console.error("[Order Service] Event processing failed:", error);
+      
       channel.nack(msg, false, false);
     }
   });
+
+  console.log("[Order Service] Consumer started.");
+
 };

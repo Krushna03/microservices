@@ -69,6 +69,59 @@ export const reserveInventory = async (event) => {
 };
 
 
+export const releaseInventory = async (event) => {
+  const session = await mongoose.startSession();
+  
+  try {
+    let result;
+
+    await session.withTransaction(async () => {
+      
+      // 1. Idempotency Check 
+      const alreadyProcessed = await findProcessedEvent( event.eventId, session ); 
+        
+      if (alreadyProcessed) { 
+        console.log(`[Inventory Service] PaymentFailed already processed: ${event.eventId}`);
+        result = { alreadyProcessed: true, }; return;
+      }
+    
+      // 2. Extract Data 
+      const { orderId, items, reason, } = event.payload; 
+    
+      // 3. Release Inventory 
+      await inventoryRepository.releaseInventory(items, session);
+
+      // 4. Create InventoryReleased 
+      await Outbox.create(
+      [
+        {
+          eventId: new mongoose.Types.ObjectId().toString(),
+          eventType: "InventoryReleased",
+          aggregateType: "Inventory",
+          aggregateId: orderId,
+          payload: {
+            orderId, 
+            userId, 
+            reason: error.message,
+          },
+        }, 
+      ], session); 
+      
+      // 5. Mark Event Processed 
+      await createProcessedEvent( event, session ); 
+    
+      result = { success: true, orderId, }; 
+      
+    }); 
+    
+    return result; 
+
+  } finally { 
+    await session.endSession(); 
+  } 
+};  
+
+
 const createReservationFailureEvent = async (event, error) => {
   const session = await mongoose.startSession();
   

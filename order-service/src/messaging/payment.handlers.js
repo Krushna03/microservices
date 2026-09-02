@@ -45,7 +45,7 @@ export const handleInventoryReleased = async (event) => {
 
     console.log(`[Order Service] Inventory released for order: ${orderId}. Cancelling order.`);
 
-    await orderRepository.cancelOrder(orderId, reason || "Payment failed");
+    await orderRepository.cancelOrder(orderId, reason || "Payment failed", session);
   })
 };
 
@@ -56,6 +56,6 @@ export const handleInventoryReservationFailed = async (event) => {
 
     console.log(`[Order Service] Inventory reservation failed for order: ${orderId}. Cancelling order.`);
 
-    await orderRepository.cancelOrder(orderId, reason || "Inventory reservation failed");
+    await orderRepository.cancelOrder(orderId, reason || "Inventory reservation failed", session);
   })
 };

@@ -1,6 +1,16 @@
 import { publishEvent } from "../messaging/publisher.js";
 import { Outbox } from "../models/outbox.model.js";
 
+const getRoutingKey = (eventType) => {
+  const mapping = {
+    InventoryReserved: "inventory.reserved",
+    InventoryReservationFailed: "inventory.reservation_failed",
+    InventoryReleased: "inventory.released",
+  };
+
+  return mapping[eventType] || "inventory.reserved";
+};
+
 export const processOutbox = async () => {
   const events = await Outbox.find({
     status: 'pending'
@@ -11,7 +21,7 @@ export const processOutbox = async () => {
   for (const event of events) {
     try {
       await publishEvent({
-        routingKey: "inventory.reserved",
+        routingKey: getRoutingKey(event.eventType),
         event: {
           eventId: event.eventId,
           eventType: event.eventType,
@@ -53,7 +63,7 @@ export const processOutbox = async () => {
 };
 
 export const startOutboxWorker = (intervalMs = 3000) => {
-  console.log("Starting Order Service Outbox Worker...");
+  console.log("Starting Inventory Service Outbox Worker...");
   setInterval(async () => {
     try {
       await processOutbox();

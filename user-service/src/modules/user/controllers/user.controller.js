@@ -15,3 +15,17 @@ export const registerUser = async (req, res, next) => {
     next(error);
   }
 };
+
+
+export const getUserById = async (req, res, next) => {
+  try {
+    const user = await userService.getUserById(req.params.userId);
+
+    return res.status(200).json({
+      success: true,
+      data: toUserResponse(user),
+    });
+  } catch (error) {
+    next(error);
+  }
+};

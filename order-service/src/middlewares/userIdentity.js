@@ -1,7 +1,7 @@
 import AppError from "../utils/AppError.js";
 
 export const userIdentity = (req, res, next) => {
-  const userId = req.headers["x-user-id"];
+  const userId = req.headers["x-user-id"] || req.body?.userId;
 
   if (!userId) {
     return next(

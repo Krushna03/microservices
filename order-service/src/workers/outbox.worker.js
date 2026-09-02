@@ -1,6 +1,14 @@
 import { publishEvent } from "../messaging/publisher.js";
 import { Outbox } from "../models/outbox.model.js";
 
+const getRoutingKey = (eventType) => {
+  const mapping = {
+    OrderCreated: "order.created",
+  };
+
+  return mapping[eventType] || "order.created";
+};
+
 export const processOutbox = async () => {
   const events = await Outbox.find({
     status: 'pending'
@@ -11,7 +19,7 @@ export const processOutbox = async () => {
   for (const event of events) {
     try {
       await publishEvent({
-        routingKey: "order.created",
+        routingKey: getRoutingKey(event.eventType),
         event: {
           eventId: event.eventId,
           eventType: event.eventType,

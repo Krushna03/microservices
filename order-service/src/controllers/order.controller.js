@@ -2,7 +2,10 @@ import * as orderService from "../services/order.service.js";
 
 export const createOrder = async (req, res, next) => {
   try {
-    const idempotencyKey = req.headers["idempotency-key"];
+    const idempotencyKey =
+      req.headers["idempotency-key"] ||
+      req.body?.["Idempotency-Key"] ||
+      req.body?.idempotencyKey;
 
     if (!idempotencyKey) {
       return res.status(400).json({
@@ -29,8 +32,8 @@ export const createOrder = async (req, res, next) => {
 export const getOrderById = async (req, res, next) => {
   try {
     const order = await orderService.getOrderById({
-        userId: req.userId,
-        orderId: req.params.orderId,
+      userId: req.userId,
+      orderId: req.params.orderId,
     });
 
     return res.status(200).json({

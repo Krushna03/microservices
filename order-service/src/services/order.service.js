@@ -1,9 +1,14 @@
+import mongoose from "mongoose";
+import { randomUUID } from "crypto";
+
 import * as orderRepository from "../repositories/order.repository.js";
 import * as userClient from "../clients/user-service.client.js";
 import * as inventoryClient from "../clients/inventory-service.client.js";
+
 import AppError from "../utils/AppError.js";
 import { ORDER_STATUS_TRANSITION } from "../constants/order.constants.js";
-import { randomUUID } from "crypto";
+import { findProcessedEvent, createProcessedEvent } from "../repositories/event.repository.js";
+
 
 export const createOrder = async ({ userId, idempotencyKey, items }) => {
 
@@ -40,24 +45,14 @@ export const createOrder = async ({ userId, idempotencyKey, items }) => {
     0
   );
 
-  let inventoryReserved = false;
-
   try {
-    await inventoryClient.reserveStock(
-      orderItems.map((item) => ({
-        productId: item.productId,
-        quantity: item.quantity,
-      }))
-    );
-
-    inventoryReserved = true;
-
-    // 5. Create order
+    // 5. Create order with status 'pending' and Outbox event 'OrderCreated'
     return await orderRepository.createOrderWithOutbox({
       orderData: {
         userId,
         idempotencyKey,
         userSnapshot: {
+          userId: user._id || user.id || userId,
           name: user.name,
           email: user.email,
         },
@@ -77,16 +72,6 @@ export const createOrder = async ({ userId, idempotencyKey, items }) => {
       }
     });
   } catch (error) {
-    // If inventory was reserved, release it
-    if (inventoryReserved) {
-      await inventoryClient.releaseStock(
-        orderItems.map((item) => ({
-          productId: item.productId,
-          quantity: item.quantity,
-        }))
-      );
-    }
-
     // MongoDB duplicate-key race
     if (error.code === 11000) {
       const order = await orderRepository.findByIdempotencyKey(idempotencyKey);
@@ -100,6 +85,7 @@ export const createOrder = async ({ userId, idempotencyKey, items }) => {
   }
 };
 
+
 export const getOrderById = async (userId, orderId) => {
   const order = await orderRepository.findById(userId, orderId);
 
@@ -110,9 +96,11 @@ export const getOrderById = async (userId, orderId) => {
   return order;
 };
 
+
 export const getOrdersByUser = async (userId) => {
   return await orderRepository.findByUserId(userId);
 };
+
 
 export const updateOrderStatus = async ({ userId, orderId, status }) => {
   const order = await orderRepository.findById(userId, orderId);
@@ -134,3 +122,84 @@ export const updateOrderStatus = async ({ userId, orderId, status }) => {
   });
 };
 
+
+export const processPaymentSucceeded = async (event) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let result;
+
+    await session.withTransaction(async () => {
+
+      // 1. Idempotency Check
+      const alreadyProcessed = await findProcessedEvent(event.eventId, session);
+
+      if (alreadyProcessed) {
+        console.log(`[Order Service] PaymentSucceeded already processed: ${event.eventId}`);
+        result = { alreadyProcessed: true, };
+        return;
+      }
+
+      // 2. Extract Data 
+      const { orderId } = event.payload;
+
+      // 3. confirm order
+      const order = await orderRepository.confirmOrder(orderId, session)
+
+      if (!order) {
+        console.log(`[Order Service] Order not found for orderId: ${orderId}`);
+        throw new Error(`Order ${orderId} not found or cannot be confirmed`);
+      }
+
+      // 4. Mark Event Processed 
+      await createProcessedEvent(event, session);
+
+      result = { success: true, orderId, status: order.status };
+
+    });
+
+    return result;
+
+  } finally {
+    await session.endSession();
+  }
+};
+
+
+export const processInventoryReleased = async (event) => {
+  const session = await mongoose.startSession();
+
+  try {
+    let result;
+
+    await session.withTransaction(async () => {
+
+      const alreadyProcessed = await findProcessedEvent(event.eventId, session);
+
+      if (alreadyProcessed) {
+        console.log(`[Order Service] InventoryReleased already processed: ${event.eventId}`);
+        result = { alreadyProcessed: true };
+        return;
+      }
+
+      const { orderId, reason } = event.payload;
+
+      const order = await orderRepository.cancelOrder(orderId, reason || "Payment failed", session);
+
+      if (!order) {
+        console.log(`[Order Service] Order not found for orderId: ${orderId}`);
+        throw new Error(`Order ${orderId} not found or cannot be cancelled`);
+      }
+
+      await createProcessedEvent(event, session);
+
+      result = { success: true, orderId, status: order.status };
+
+    });
+
+    return result;
+
+  } finally {
+    await session.endSession();
+  }
+};

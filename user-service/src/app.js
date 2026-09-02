@@ -8,6 +8,7 @@ import userRoutes from "./modules/user/routes/user.routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 import { correlationId } from "./middlewares/correlationId.js";
 import authRoutes from "./modules/user/routes/auth.routes.js";
+import internalRoutes from "./modules/user/routes/internal.routes.js";
 
 const app = express();
 
@@ -43,6 +44,10 @@ app.use("/api/v1/auth", authRoutes);
 
 // User routes
 app.use("/api/v1/users", userRoutes);
+
+// Internal routes
+app.use("/internal/users", internalRoutes);
+app.use("/api/v1/internal/users", internalRoutes);
 
 // Error middleware
 app.use(errorHandler);

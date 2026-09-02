@@ -26,3 +26,18 @@ export const registerUser = async ({ name, email, password }) => {
   // 4. Return plain user data
   return user;
 };
+
+
+export const getUserById = async (userId) => {
+  if (!userId) {
+    throw new AppError("User ID is required", 400);
+  }
+
+  const user = await userRepository.findById(userId).catch(() => null);
+
+  if (!user) {
+    throw new AppError("User not found", 404);
+  }
+
+  return user;
+};
