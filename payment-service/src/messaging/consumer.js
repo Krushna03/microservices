@@ -51,14 +51,7 @@ export const startConsumer = async () => {
 
       console.log(`[Payment Service] Event Received: ${ event.eventType }`);
 
-      console.log(`[Payment Service]Attempt: ${ retryAttempt + 1 }`);
-
-      // Business Logic
-      await processInventoryReserved(event);
-
-      console.log(`[Payment Service] Event Received: ${ event.eventType }`);
-
-      console.log(`[Payment Service]Attempt: ${ retryAttempt + 1 }`);
+      console.log(`[Payment Service] Attempt: ${ retryAttempt + 1 }`);
 
       // Business Logic
       await processInventoryReserved(event);
@@ -74,28 +67,38 @@ export const startConsumer = async () => {
 
       const nextAttempt = retryAttempt + 1;
 
-      // Retry available?
+      // Retry available
       if (nextAttempt <= RETRY_CONFIG.maxAttempts) {
 
-        const published = publishToRetryQueue(channel, message, nextAttempt, RETRY_QUEUE_PREFIX);
+        const delay = getRetryDelay(nextAttempt);
 
-        if (published) {
-          // ACK the original message
-          // because we successfully copied
-          // it to the retry queue.
-          channel.ack(message);
+        const retryQueue = `${RETRY_QUEUE_PREFIX}.${delay}ms`;
 
-          console.log(`[Payment Service] Message scheduled for retry #${ nextAttempt }`);
+        try {
+          const published = await publishToRetryQueue(channel, message, nextAttempt, retryQueue);
 
-          return;
+          if (published) {
+            // ACK the original message because we successfully copied it to retry queue.
+            channel.ack(message);
+
+            console.log(`[Payment Service] Message scheduled for retry #${nextAttempt}`);
+          }
+
+        } catch (publishError) {
+          console.error("[Payment Service] Failed to schedule retry:", publishError);
+
+          //3rd argument is true: This is only when publishing to the retry queue failed.
+          channel.nack(message, false, true);
         }
+
+        return;
       }
 
       // No retries remaining.
       // Send message to DLQ.
       channel.nack(message, false, false);
       
-      console.error(`[Payment Service] Max retries exceeded.Message sent to DLQ.`);
+      console.error(`[Payment Service] Max retries exceeded. Message sent to DLQ.`);
     }
   });
 

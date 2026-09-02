@@ -9,8 +9,22 @@ export const connectRabbitMQ = async () => {
 
   connection = await amqp.connect(env.RABBITMQ_URL);
 
+  // Confirm channel ensure publisher receive successfull message delivery confirmation before message delivery to next
+  channel = await connection.createConfirmChannel();
 
-  channel = await connection.createChannel();
+  connection.on("error", (error) => {
+    console.error("RabbitMQ connection error:", error);
+  });
+
+  connection.on("close", () => {
+    console.error("RabbitMQ connection closed");
+    channel = null;
+    connection = null;
+  });
+
+  channel.on("error", (error) => {
+    console.error("RabbitMQ channel error:", error);
+  });
 
   await channel.assertExchange(
     "writing.events",
