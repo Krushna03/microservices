@@ -1,5 +1,6 @@
-import mongoose from "mongoose";
 import { Inventory } from "../models/inventory.model.js";
+import { BusinessError } from "../../../shared/errors/business-error.js";
+
 
 export const findByProductId = async (productId, session = null) => {
   const query = Inventory.findOne({ productId });
@@ -21,7 +22,7 @@ export const reserveInventory = async (items, session) => {
     }
 
     if (inventory.availableQuantity < item.quantity) {
-      throw new Error(`Insufficient inventory for product ${item.productId}`);
+      throw new BusinessError(`Insufficient inventory for product ${item.productId}`, "INSUFFICIENT_INVENTORY");
     }
 
     inventory.availableQuantity -= item.quantity;

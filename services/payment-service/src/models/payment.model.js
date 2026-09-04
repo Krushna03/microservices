@@ -35,7 +35,8 @@ const paymentSchema = new mongoose.Schema({
       "failed",
       "refunded",
     ],
-    default: "pending"
+    default: "pending",
+    index: true
   },
 
   transactionId: {

@@ -1,4 +1,6 @@
 import { Inventory } from "../models/inventory.model.js";
+import { BusinessError } from "../../../shared/errors/business-error.js";
+
 
 export const findByProductId = async (productId, session = null) => {
   const query = Inventory.findOne({ productId });
@@ -29,7 +31,7 @@ export const reserveInventory = async (items, session) => {
     ).lean();
 
     if (!inventory) {
-      throw new Error(`Insufficient inventory for product ${item.productId}`);
+      throw new BusinessError(`Inventory not found for product ${item.productId}`, "INVENTORY_NOT_FOUND");
     }
 
     reservedItems.push({ productId: item.productId, quantity: item.quantity, });
@@ -40,12 +42,12 @@ export const reserveInventory = async (items, session) => {
 
 
 export const releaseInventory = async (items, session) => {
-  const reserveItems = [];
+  const releasedItems = [];
 
   for (const item of items) {
     const inventory = await Inventory.findOneAndUpdate({
       productId: item.productId,
-      $expr: { $gte: ["$reservedQuantity", item.quantity,], },
+      $expr: { $gte: ["$reservedQuantity", item.quantity,] },
       },
       { $inc: {
           reservedQuantity: -item.quantity,
@@ -56,11 +58,11 @@ export const releaseInventory = async (items, session) => {
     ).lean();
 
     if (!inventory) {
-      throw new Error(`Unable to release reserved inventory for product ${item.productId}`);
+      throw new BusinessError(`Unable to release reserved inventory for product ${item.productId}`, "INVENTORY_RELEASE_FAILED");
     }
 
-    reserveItems.push({ productId: item.productId, quantity: item.quantity, });
+    releasedItems.push({ productId: item.productId, quantity: item.quantity, });
   }
 
-  return reserveItems;
+  return releasedItems;
 };

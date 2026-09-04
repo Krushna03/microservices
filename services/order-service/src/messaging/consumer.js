@@ -1,21 +1,27 @@
 import { connectRabbitMQ } from "./rabbitmq.js";
-import { handlePaymentSucceeded, handleInventoryReleased, handleInventoryReservationFailed } from "./payment.handlers.js";
+import { handlePaymentSucceeded, handleInventoryReleased, handleInventoryReservationFailed, } from "./payment.handlers.js";
+import { setupRetryQueues } from "../../../shared/rabbitmq/retry.js";
+import { processMessageWithRetry } from "../../../shared/rabbitmq/message.processor.js";
+
 
 export const startConsumer = async () => {
   const channel = await connectRabbitMQ();
 
-  // Assert Dead Letter Queue (DLQ)
-  await channel.assertQueue("order-service.dlq", {
-    durable: true,
-  });
-
-  await channel.bindQueue(
-    "order-service.dlq",
-    "writing.events.dlx",
-    "order.processing.failed"
+  // main exchange
+  await channel.assertExchange(
+    "writing.events",
+    "topic",
+    { durable: true }
   );
 
-  // Assert main queue
+  // Dead Letter Exchange
+  await channel.assertExchange(
+    "writing.events.dlx",
+    "topic",
+    { durable: true }
+  );
+
+  // main queue
   const queue = await channel.assertQueue("order-service", {
     durable: true,
     arguments: {
@@ -24,63 +30,60 @@ export const startConsumer = async () => {
     },
   });
 
-  // Bind queue to Saga events, payment Succeed
-  await channel.bindQueue(
-    queue.queue,
-    "writing.events",
-    "payment.succeeded"
-  );
+  // Payment succeeded
+  await channel.bindQueue(queue.queue, "writing.events", "payment.succeeded");
 
-  // Inventory Released
-  await channel.bindQueue(
-    queue.queue,
-    "writing.events",
-    "inventory.released"
-  );
+  // Inventory released
+  await channel.bindQueue(queue.queue, "writing.events", "inventory.released");
 
-  // Inventory Reservation Failed
-  await channel.bindQueue(
-    queue.queue,
-    "writing.events",
-    "inventory.reservation_failed"
-  );
+  // Inventory reservation failed
+  await channel.bindQueue(queue.queue, "writing.events", "inventory.reservation_failed");
 
-  console.log("Order Service listening for Saga events ('payment.succeeded', 'inventory.released', 'inventory.reservation_failed')...");
+  // Retry queues + DLQ
+  await setupRetryQueues(channel, {
+    retryQueuePrefix: "order-service.retry",
+    deadLetterQueue: "order-service.dlq",
+    /*
+     * This is a little different from Payment/Inventory.
+     *
+     * The same retry queue can receive events
+     * from multiple routing keys.
+     *
+     * Therefore we cannot simply use one routing key
+     * for all retry messages.
+     */
+  });
 
   await channel.prefetch(10);
 
-  await channel.consume(queue.queue, async (msg) => {
-    if (!msg) return;
+  await channel.consume(queue.queue, async (message) => {
+    if (!message) return;
 
-    try {
-      const event = JSON.parse(msg.content.toString());
-      
-      const routingKey = msg.fields.routingKey;
+    const routingKey = message.fields.routingKey;
 
-      console.log(`[Order Service] Event Received: ${event.eventType} (Key: ${routingKey})`);
+    let handler;
 
-      if (event.eventType === "PaymentSucceeded" || routingKey === "payment.succeeded") {
-        await handlePaymentSucceeded(event);
-      }
-      else if (event.eventType === "InventoryReleased" || routingKey === "inventory.released") {
-        await handleInventoryReleased(event);
-      }
-      else if (event.eventType === "InventoryReservationFailed" || routingKey === "inventory.reservation_failed") {
-        await handleInventoryReservationFailed(event);
-      }
-      else {
-        console.warn(`[Order Service] Unhandled event type: ${event.eventType}`);
-      }
-
-      channel.ack(msg);
-
-    } catch (error) {
-      console.error("[Order Service] Event processing failed:", error);
-      
-      channel.nack(msg, false, false);
+    if (routingKey === "payment.succeeded") {
+      handler = handlePaymentSucceeded;
     }
+    else if (routingKey === "inventory.released") {
+      handler = handleInventoryReleased;
+    }
+    else if (routingKey === "inventory.reservation_failed") {
+      handler = handleInventoryReservationFailed;
+    }
+
+    if (!handler) {
+      console.warn(`[Order Service] Unknown routing key: ${routingKey}`);
+      //  Don't endlessly retry an event that this service doesn't understand.
+      channel.nack(message, false, false);
+      return;
+    }
+
+    await processMessageWithRetry(channel, message, handler, {
+      retryQueuePrefix: "order-service.retry"
+    });
   });
 
   console.log("[Order Service] Consumer started.");
-
 };

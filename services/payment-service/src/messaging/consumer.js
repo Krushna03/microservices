@@ -1,106 +1,98 @@
 import { connectRabbitMQ } from "./rabbitmq.js";
 import { processInventoryReserved } from "../services/payment.service.js";
-import { RETRY_CONFIG } from "./retry.config.js";
-import { setupRetryQueues, getRetryAttempt, } from "./retry.js";
-import { publishToRetryQueue } from "./retry.publisher.js";
+import { setupRetryQueues } from "../../../../shared/rabbitmq/retry.js";
+import { processMessageWithRetry } from "../../../../shared/rabbitmq/message.processor.js";
+import { startRetryDispatcher } from "../../../../shared/rabbitmq/retry.dispatcher.js";
+import { RABBITMQ_CONFIG } from "../config/rabbitmq.config.js";
 
 export const startConsumer = async () => {
   const channel = await connectRabbitMQ();
 
-  // Queue Configuration
-  const MAIN_QUEUE = "payment-service";
-  
-  const RETRY_QUEUE_PREFIX = "payment-service.retry";
-  
-  const DLQ = "payment-service.dlq";
-  
-  const EVENT_EXCHANGE = "writing.events";
-  
-  const DEAD_LETTER_EXCHANGE = "writing.events.dlx";
-
-  // Retry / DLQ Setup
-  await setupRetryQueues(
-    channel,
+  /*
+   * Main exchange
+   */
+  await channel.assertExchange(RABBITMQ_CONFIG.exchange,
+    "topic",
     {
-      mainQueue: MAIN_QUEUE,
-      retryQueuePrefix: RETRY_QUEUE_PREFIX,
-      deadLetterQueue: DLQ,
-      retryRoutingKey: "inventory.reserved",
-      dlqRoutingKey: "payment.processing.failed",
-      eventExchange: EVENT_EXCHANGE,
-      deadLetterExchange: DEAD_LETTER_EXCHANGE,
+      durable: true,
     }
   );
 
-  // Bind Main Queue
-  await channel.bindQueue(MAIN_QUEUE, EVENT_EXCHANGE, "inventory.reserved");
+  /*
+   * Dead-letter exchange
+   */
+  await channel.assertExchange(RABBITMQ_CONFIG.deadLetterExchange,
+    "topic",
+    {
+      durable: true,
+    }
+  );
 
-  // Backpressure
-  channel.prefetch(10);
+  /*
+   * Main queue
+   */
+  const queue = await channel.assertQueue(RABBITMQ_CONFIG.queue, {
+    durable: true,
+    arguments: {
+      "x-dead-letter-exchange": RABBITMQ_CONFIG.deadLetterExchange,
+      "x-dead-letter-routing-key": RABBITMQ_CONFIG.dlqRoutingKey,
+    },
+  });
 
-  // Consumer
-  await channel.consume(MAIN_QUEUE, async (message) => {
-    if (!message) {
+  /*
+   * Bind required events
+   */
+  for (const routingKey of RABBITMQ_CONFIG.routingKeys) {
+    await channel.bindQueue(queue.queue, RABBITMQ_CONFIG.exchange, routingKey);
+  }
+
+  /*
+   * Retry queues
+   */
+  await setupRetryQueues(channel, {
+    retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix,
+    deadLetterQueue: RABBITMQ_CONFIG.dlq,
+  });
+
+  /*
+   * Retry dispatcher
+   */
+  await startRetryDispatcher(channel, {
+    retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix,
+    eventExchange: RABBITMQ_CONFIG.exchange,
+    }
+  );
+
+  /*
+   * Limit concurrent messages.
+   */
+  await channel.prefetch(10);
+
+  /*
+   * Consume events.
+   */
+  await channel.consume(queue.queue, async (message) => {
+    if (!message) return;
+
+    const routingKey = message.fields?.routingKey;
+
+    console.log(`[Payment Service] Event received: ${routingKey}`);
+
+    if (routingKey === "inventory.reserved") {
+      await processMessageWithRetry(channel, message, processInventoryReserved, {
+        retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix,
+      });
+
       return;
     }
 
-    const retryAttempt = getRetryAttempt(message);
+    /*
+      * Unknown event
+      */
+    console.warn(`[Payment Service] Unknown routing key: ${routingKey}`);
 
-    try {
-      const event = JSON.parse(message.content.toString());
-
-      console.log(`[Payment Service] Event Received: ${ event.eventType }`);
-
-      console.log(`[Payment Service] Attempt: ${ retryAttempt + 1 }`);
-
-      // Business Logic
-      await processInventoryReserved(event);
-
-      // ACK only after the business
-      // transaction has completed.
-      channel.ack(message);
-
-      console.log(`[Payment Service] Event processed successfully: ${event.eventId} `);
-      
-    } catch (error) {
-      console.error("[Payment Service] Event processing failed:", error);
-
-      const nextAttempt = retryAttempt + 1;
-
-      // Retry available
-      if (nextAttempt <= RETRY_CONFIG.maxAttempts) {
-
-        const delay = getRetryDelay(nextAttempt);
-
-        const retryQueue = `${RETRY_QUEUE_PREFIX}.${delay}ms`;
-
-        try {
-          const published = await publishToRetryQueue(channel, message, nextAttempt, retryQueue);
-
-          if (published) {
-            // ACK the original message because we successfully copied it to retry queue.
-            channel.ack(message);
-
-            console.log(`[Payment Service] Message scheduled for retry #${nextAttempt}`);
-          }
-
-        } catch (publishError) {
-          console.error("[Payment Service] Failed to schedule retry:", publishError);
-
-          //3rd argument is true: This is only when publishing to the retry queue failed.
-          channel.nack(message, false, true);
-        }
-
-        return;
-      }
-
-      // No retries remaining.
-      // Send message to DLQ.
-      channel.nack(message, false, false);
-      
-      console.error(`[Payment Service] Max retries exceeded. Message sent to DLQ.`);
-    }
+    channel.nack(message, false, false);
   });
 
-  console.log("[Payment Service] Consumer started listening for 'inventory.reserved'");
+  console.log("[Payment Service] Consumer started.");
 };

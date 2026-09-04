@@ -12,6 +12,18 @@ export const findByOrderId = async (orderId, session = null) => {
 };
 
 
+export const findByPaymentId = async (paymentId, session = null) => {
+
+  const query = await Payment.findOne({ paymentId });
+
+  if (session) {
+    query.session(session);
+  }
+
+  return query.lean();
+};
+
+
 export const createPayment = async (paymentData, session) => {
    const [payment] = await Payment.create([paymentData], { session });
 
@@ -21,8 +33,8 @@ export const createPayment = async (paymentData, session) => {
 
 export const makePaymentCompleted = async (paymentId, transactionId, session) => {
 
-  const payment = await Payment.findByIdAndUpdate(
-    paymentId,
+  const payment = await Payment.findOneAndUpdate(
+    { paymentId, status: "pending" },
     {
       $set: {
         status: "completed",
@@ -43,8 +55,8 @@ export const makePaymentCompleted = async (paymentId, transactionId, session) =>
 
 export const makePaymentFailed = async (paymentId, reason, session) => {
   
-  const payment = await Payment.findByIdAndUpdate(
-    paymentId,
+  const payment = await Payment.findOneAndUpdate(
+    { paymentId, status: "pending" },
     {
       $set: {
         status: "failed",
