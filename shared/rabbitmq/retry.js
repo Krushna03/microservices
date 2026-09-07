@@ -1,7 +1,9 @@
 import { RETRY_CONFIG } from "./retry.config.js";
 
 
-export const setupRetryQueues = async (channel, {
+export const setupRetryQueues = async (
+  channel,
+  {
     retryQueuePrefix,
     deadLetterQueue,
     deadLetterExchange,
@@ -11,16 +13,48 @@ export const setupRetryQueues = async (channel, {
 
   /*
    * ============================================================
-   * Retry Queues
+   * Retry Exchange & Dispatch Queue
    * ============================================================
    *
-   * Messages stay here for the configured TTL.
+   * When message TTL expires in any of the retry delay queues,
+   * RabbitMQ automatically dead-letters the expired message to
+   * this exchange, which places it into the single dispatch queue.
+   */
+
+  const retryDlx = `${retryQueuePrefix}.dlx`;
+  const dispatchQueue = `${retryQueuePrefix}.dispatch`;
+  const retryReadyRoutingKey = "retry.ready";
+
+  await channel.assertExchange(retryDlx, "direct", {
+    durable: true,
+  });
+
+  await channel.assertQueue(dispatchQueue, {
+    durable: true,
+  });
+
+  await channel.bindQueue(
+    dispatchQueue,
+    retryDlx,
+    retryReadyRoutingKey
+  );
+
+
+  /*
+   * ============================================================
+   * Retry Delay Queues (NO ACTIVE CONSUMERS!)
+   * ============================================================
+   *
+   * Messages stay here unconsumed for the full configured TTL.
+   * Because NO consumer listens on these delay queues, RabbitMQ
+   * guarantees the message waits the full delay before dead-lettering.
    *
    * Example:
-   *
-   * payment-service.retry.1000ms
-   * payment-service.retry.2000ms
-   * payment-service.retry.4000ms
+   * order-service.retry.1000ms  (TTL: 1000ms)
+   * order-service.retry.2000ms  (TTL: 2000ms)
+   * order-service.retry.4000ms  (TTL: 4000ms)
+   * order-service.retry.8000ms  (TTL: 8000ms)
+   * order-service.retry.16000ms (TTL: 16000ms)
    */
 
   for (const delay of RETRY_CONFIG.delays) {
@@ -31,6 +65,8 @@ export const setupRetryQueues = async (channel, {
       durable: true,
       arguments: {
         "x-message-ttl": delay,
+        "x-dead-letter-exchange": retryDlx,
+        "x-dead-letter-routing-key": retryReadyRoutingKey,
       },
     });
   }
@@ -38,8 +74,11 @@ export const setupRetryQueues = async (channel, {
 
   /*
    * ============================================================
-   * Dead Letter Queue
+   * Dead Letter Queue (DLQ)
    * ============================================================
+   *
+   * Messages that exceed max retry attempts or fail with unrecoverable
+   * system errors are routed here from the main queue DLX.
    */
 
   await channel.assertQueue(deadLetterQueue, {
@@ -51,12 +90,6 @@ export const setupRetryQueues = async (channel, {
    * ============================================================
    * DLQ Binding
    * ============================================================
-   *
-   * Main Queue
-   *     ↓
-   * Dead Letter Exchange
-   *     ↓
-   * Service DLQ
    */
 
   if (deadLetterExchange && dlqRoutingKey) {
@@ -104,7 +137,6 @@ export const getRetryDelay = (attempt) => {
 /*
  * Get original routing key.
  */
-
 export const getOriginalRoutingKey = (message) => {
 
   const headers = message.properties?.headers || {};
