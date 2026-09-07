@@ -1,4 +1,4 @@
-import { processOutbox } from "./workers/outbox.worker.js";
+import { startOutboxWorker } from "./workers/outbox.worker.js";
 import { startConsumer } from "./messaging/consumer.js";
 import app from "./app.js";
 import connectDB from "./config/db.js";
@@ -17,7 +17,7 @@ const startServer = async () => {
       console.warn("Payment Service running (RabbitMQ offline)");
     }
 
-    setInterval(processOutbox, 3000);
+    startOutboxWorker();
 
     app.listen(PORT, () => {
       console.log(`Payment Service running on port ${PORT}`);

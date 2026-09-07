@@ -12,7 +12,8 @@ const requiredEnvVariables = [
   "JWT_SECRET",
   "USER_SERVICE_URL",
   "ORDER_SERVICE_URL",
-  "PAYMENT_SERVICE_URL"
+  "PAYMENT_SERVICE_URL",
+  "LOG_LEVEL",
 ];
 
 for (const variable of requiredEnvVariables) {
@@ -33,6 +34,8 @@ const env = {
   ORDER_SERVICE_URL: process.env.ORDER_SERVICE_URL,
 
   PAYMENT_SERVICE_URL: process.env.PAYMENT_SERVICE_URL || "http://localhost:3004",
+
+  LOG_LEVEL: process.env.LOG_LEVEL || "info",
 };
 
 export default env;

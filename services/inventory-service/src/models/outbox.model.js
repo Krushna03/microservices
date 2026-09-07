@@ -35,6 +35,7 @@ const outboxSchema = new mongoose.Schema(
       type: String,
       enum: [
         "pending",
+        "processing",
         "published",
         "failed",
       ],
@@ -48,6 +49,30 @@ const outboxSchema = new mongoose.Schema(
     },
 
     publishedAt: {
+      type: Date,
+      default: null,
+    },
+
+    nextAttemptAt: {
+      type: Date,
+      default: null,
+    },
+
+    correlationId: {
+      type: String,
+      required: true,
+      index:true
+    },
+
+    // Worker currently processing this event.
+    lockedBy: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    // When the worker acquired the lock.
+    lockedAt: {
       type: Date,
       default: null,
     },

@@ -89,6 +89,7 @@ export const processInventoryReserved = async (event) => {
           {
             eventId: crypto.randomUUID(),
             eventType: "PaymentSucceeded",
+            correlationId: event.correlationId,
             aggregateType: "Payment",
             aggregateId: payment._id.toString(),
 
@@ -126,6 +127,7 @@ export const processInventoryReserved = async (event) => {
             {
               eventId: crypto.randomUUID(),
               eventType: "PaymentFailed",
+              correlationId: event.correlationId,
               aggregateType: "Payment",
               aggregateId: payment._id.toString(),
 

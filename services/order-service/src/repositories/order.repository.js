@@ -21,6 +21,7 @@ export const createOrderWithOutbox = async (orderDataParam, eventDataParam) => {
         {
           eventId: eventData.eventId,
           eventType: eventData.eventType,
+          correlationId: eventData.correlationId,
           aggregateType: "Order",
           aggregateId: order._id.toString(),
           payload: {

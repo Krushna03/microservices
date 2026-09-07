@@ -10,7 +10,7 @@ import { ORDER_STATUS_TRANSITION } from "../constants/order.constants.js";
 import { findProcessedEvent, createProcessedEvent } from "../repositories/event.repository.js";
 
 
-export const createOrder = async ({ userId, idempotencyKey, items }) => {
+export const createOrder = async ({ userId, idempotencyKey, items, correlationId }) => {
 
   const eventId = randomUUID();
 
@@ -64,6 +64,7 @@ export const createOrder = async ({ userId, idempotencyKey, items }) => {
       eventData: {
         eventId,
         eventType: "OrderCreated",
+        correlationId,
         payload: {
           userId,
           items: orderItems,

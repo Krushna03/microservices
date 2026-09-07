@@ -48,6 +48,7 @@ export const reserveInventory = async (event) => {
             {
               eventId: new mongoose.Types.ObjectId().toString(),
               eventType: "InventoryReserved",
+              correlationId: event.correlationId,
               aggregateType: "Inventory",
               aggregateId: orderId,
               payload: {
@@ -88,6 +89,7 @@ export const reserveInventory = async (event) => {
               {
                 eventId: new mongoose.Types.ObjectId().toString(),
                 eventType: "InventoryReservationFailed",
+                correlationId: event.correlationId,
                 aggregateType: "Inventory",
                 aggregateId: orderId,
                 payload: {
@@ -178,6 +180,7 @@ export const releaseInventory = async (event) => {
           {
             eventId: new mongoose.Types.ObjectId().toString(),
             eventType: "InventoryReleased",
+            correlationId: event.correlationId,
             aggregateType: "Inventory",
             aggregateId: orderId,
             payload: {

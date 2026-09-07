@@ -13,6 +13,7 @@ const requiredEnvVariables = [
   "INTERNAL_SERVICE_TOKEN",
   "ORDER_SERVICE_URL",
   "INVENTORY_SERVICE_URL",
+  "LOG_LEVEL"
 ];
 
 for (const variable of requiredEnvVariables) {
@@ -37,6 +38,8 @@ const env = {
   INVENTORY_SERVICE_URL: process.env.INVENTORY_SERVICE_URL || "http://localhost:3003",
 
   RABBITMQ_URL: process.env.RABBITMQ_URL || "amqp://localhost:5672",
+
+  LOG_LEVEL: process.env.LOG_LEVEL || "info",
 };
 
 export default env;

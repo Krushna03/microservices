@@ -1,17 +1,21 @@
 import { RETRY_CONFIG } from "./retry.config.js";
 import { publishToExchange } from "./retry.publisher.js";
 
-// Retry Queue
-//     ↓
-// Message expires
-//     ↓
-// Retry Dispatcher receives it
-//     ↓
-// Read x - original - routing - key
-//     ↓
-// Publish to writing.events
-//     ↓
-// Original consumer receives it again
+/*
+ * Retry Queue
+ *     ↓
+ * Message expires
+ *     ↓
+ * Retry Dispatcher
+ *     ↓
+ * Read original routing key
+ *     ↓
+ * Publish to main exchange
+ *     ↓
+ * RabbitMQ confirms publish
+ *     ↓
+ * ACK retry message
+ */
 
 export const startRetryDispatcher = async (channel, {
     retryQueuePrefix,
@@ -19,6 +23,7 @@ export const startRetryDispatcher = async (channel, {
   }
 ) => {
 
+  // Limit the number of retry messages processed concurrently.
   await channel.prefetch(10); 
   
   for (const delay of RETRY_CONFIG.delays) {

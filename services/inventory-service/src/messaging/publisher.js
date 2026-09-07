@@ -14,13 +14,25 @@ export const publishEvent = async (routingKeyOrObj, eventParam) => {
     event = eventParam;
   }
 
-  return channel.publish(
-    "writing.events",
-    routingKey,
-    Buffer.from(JSON.stringify(event)),
-    {
-      persistent: true,
-      contentType: "application/json",
-    }
-  );
+  const message = Buffer.from(JSON.stringify(event));
+
+  return new Promise((resolve, reject) => {
+    channel.publish(
+      "writing.events",
+      routingKey,
+      message,
+      {
+        persistent: true,
+        contentType: "application/json",
+      },
+      (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+
+        resolve();
+      }
+    );
+  });
 };

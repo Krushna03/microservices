@@ -6,9 +6,13 @@ import userRoutes from "./routes/user.routes.js";
 import orderRoutes from "./routes/order.routes.js";
 import paymentRoutes from "./routes/payment.routes.js";
 
+import { correlationIdMiddleware } from "./middleware/correlation-id.middleware.js";
+
 const app = express();
 
 app.use(express.json());
+
+app.use(correlationIdMiddleware);
 
 app.get("/health/live", (req, res) => {
   res.status(200).json({

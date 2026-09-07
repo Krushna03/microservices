@@ -7,10 +7,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 
 const requiredEnvVariables = [
+  "NODE_ENV",
   "PORT",
   "MONGODB_URI",
   "USER_SERVICE_URL",
   "INTERNAL_SERVICE_TOKEN",
+  "ORDER_SERVICE_URL",
+  "INVENTORY_SERVICE_URL",
+  "RABBITMQ_URL",
+  "LOG_LEVEL"
 ];
 
 for (const variable of requiredEnvVariables) {
@@ -35,6 +40,8 @@ const env = {
   INVENTORY_SERVICE_URL: process.env.INVENTORY_SERVICE_URL,
 
   RABBITMQ_URL: process.env.RABBITMQ_URL,
+
+  LOG_LEVEL: process.env.LOG_LEVEL || "info",
 };
 
 export default env;

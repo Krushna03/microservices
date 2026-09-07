@@ -6,37 +6,34 @@ export const createOutboxEvent = async (eventData, session) => {
   return event.toObject();
 };
 
-
-export const claimPendingOutboxEvents = async (limit = 100, workerId,leaseDurationMs = 60_000) => {
+export const claimPendingOutboxEvents = async (limit = 100, workerId, leaseDurationMs = 60_000) => {
   const events = [];
-
   const lockedAt = new Date();
-
   const lockExpiration = new Date(Date.now() - leaseDurationMs);
 
   for (let i = 0; i < limit; i++) {
-    const event = await Outbox.findOneAndUpdate({
-      // Event is ready for processing.
-      $or: [
-        {
-          status: "pending",
-          $or: [
-            { nextAttemptAt: null },
-            {
-              nextAttemptAt: {
-                $lte: new Date(),
+    const event = await Outbox.findOneAndUpdate(
+      {
+        // Event is ready for processing
+        $or: [
+          {
+            status: "pending",
+            $or: [
+              { nextAttemptAt: null },
+              {
+                nextAttemptAt: {
+                  $lte: new Date(),
+                },
               },
-            },
-          ],
-        },
-
-        // Worker previously crashed and its lease expired.
-        {
-          status: "processing",
-          lockedAt: { $lte: lockExpiration },
-        },
-      ],},
-
+            ],
+          },
+          // Worker previously crashed and its lease expired
+          {
+            status: "processing",
+            lockedAt: { $lte: lockExpiration },
+          },
+        ],
+      },
       {
         $set: {
           status: "processing",
@@ -45,14 +42,12 @@ export const claimPendingOutboxEvents = async (limit = 100, workerId,leaseDurati
         },
       },
       {
-        sort: {
-          createdAt: 1,
-        },
+        sort: { createdAt: 1 },
         returnDocument: "after",
       }
     ).lean();
 
-    if(!event){
+    if (!event) {
       break;
     }
 
@@ -60,8 +55,7 @@ export const claimPendingOutboxEvents = async (limit = 100, workerId,leaseDurati
   }
 
   return events;
-}
-
+};
 
 export const markPublished = async (eventId, workerId) => {
   return Outbox.updateOne(
@@ -70,7 +64,6 @@ export const markPublished = async (eventId, workerId) => {
       status: "processing",
       lockedBy: workerId,
     },
-
     {
       $set: {
         status: "published",
@@ -79,14 +72,12 @@ export const markPublished = async (eventId, workerId) => {
         lockedAt: null,
         nextAttemptAt: null,
       },
-
       $inc: {
         attempts: 1,
       },
     }
   );
 };
-
 
 export const markFailed = async (eventId, workerId, nextAttemptAt) => {
   return Outbox.updateOne(
@@ -95,7 +86,6 @@ export const markFailed = async (eventId, workerId, nextAttemptAt) => {
       status: "processing",
       lockedBy: workerId,
     },
-
     {
       $set: {
         status: "pending",
@@ -103,7 +93,6 @@ export const markFailed = async (eventId, workerId, nextAttemptAt) => {
         lockedBy: null,
         lockedAt: null,
       },
-
       $inc: {
         attempts: 1,
       },

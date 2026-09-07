@@ -18,6 +18,7 @@ export const createOrder = async (req, res, next) => {
       userId: req.userId,
       idempotencyKey,
       items: req.body.items,
+      correlationId: req.correlationId,
     });
 
     return res.status(201).json({

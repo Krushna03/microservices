@@ -1,10 +1,13 @@
 import express from "express";
 import orderRoutes from "./routes/order.routes.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
+import { correlationIdMiddleware } from "./middlewares/correlation-id.middleware.js";
 
 const app = express();
 
 app.use(express.json());
+
+app.use(correlationIdMiddleware);
 
 // Health check
 app.get("/health/live", (req, res) => {
