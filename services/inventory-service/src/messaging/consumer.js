@@ -1,19 +1,37 @@
 import { connectRabbitMQ } from "./rabbitmq.js";
-import { reserveInventory, processPaymentFailed } from "../services/inventory.service.js";
-import { setupRetryQueues } from "../../../../shared/rabbitmq/retry.js";
-import { processMessageWithRetry } from "../../../../shared/rabbitmq/message.processor.js";
-import { startRetryDispatcher } from "../../../../shared/rabbitmq/retry.dispatcher.js";
-import { RABBITMQ_CONFIG } from "./rabbitmq.config.js";
+
+import {
+  reserveInventory,
+  processPaymentFailed,
+} from "../services/inventory.service.js";
+
+import {
+  setupRetryQueues,
+} from "../../../../shared/rabbitmq/retry.js";
+
+import {
+  processMessageWithRetry,
+} from "../../../../shared/rabbitmq/message.processor.js";
+
+import {
+  startRetryDispatcher,
+} from "../../../../shared/rabbitmq/retry.dispatcher.js";
+
+import {
+  RABBITMQ_CONFIG,
+} from "./rabbitmq.config.js";
 
 
 export const startConsumer = async () => {
-  const channel = await connectRabbitMQ();
+
+  const channel =
+    await connectRabbitMQ();
+
 
   /*
-   * ============================================================
-   * 1. Main Event Exchange
-   * ============================================================
+   * Main Exchange
    */
+
   await channel.assertExchange(
     RABBITMQ_CONFIG.exchange,
     "topic",
@@ -22,11 +40,11 @@ export const startConsumer = async () => {
     }
   );
 
+
   /*
-   * ============================================================
-   * 2. Dead Letter Exchange
-   * ============================================================
+   * Dead Letter Exchange
    */
+
   await channel.assertExchange(
     RABBITMQ_CONFIG.deadLetterExchange,
     "topic",
@@ -35,25 +53,37 @@ export const startConsumer = async () => {
     }
   );
 
-  /*
-   * ============================================================
-   * 3. Main Inventory Queue
-   * ============================================================
-   */
-  const queue = await channel.assertQueue(RABBITMQ_CONFIG.queue, {
-    durable: true,
-    arguments: {
-      "x-dead-letter-exchange": RABBITMQ_CONFIG.deadLetterExchange,
-      "x-dead-letter-routing-key": RABBITMQ_CONFIG.dlqRoutingKey,
-    },
-  });
 
   /*
-   * ============================================================
-   * 4. Bind Events Inventory Service Consumes
-   * ============================================================
+   * Main Queue
    */
-  for (const routingKey of RABBITMQ_CONFIG.routingKeys) {
+
+  const queue =
+    await channel.assertQueue(
+      RABBITMQ_CONFIG.queue,
+      {
+        durable: true,
+
+        arguments: {
+          "x-dead-letter-exchange":
+            RABBITMQ_CONFIG.deadLetterExchange,
+
+          "x-dead-letter-routing-key":
+            RABBITMQ_CONFIG.dlqRoutingKey,
+        },
+      }
+    );
+
+
+  /*
+   * Bind Events
+   */
+
+  for (
+    const routingKey
+    of RABBITMQ_CONFIG.routingKeys
+  ) {
+
     await channel.bindQueue(
       queue.queue,
       RABBITMQ_CONFIG.exchange,
@@ -61,95 +91,130 @@ export const startConsumer = async () => {
     );
   }
 
-  /*
-   * ============================================================
-   * 5. Retry Queues + DLQ
-   * ============================================================
-   */
-  await setupRetryQueues(channel, {
-    retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix,
-    deadLetterQueue: RABBITMQ_CONFIG.dlq,
-  });
 
   /*
-   * ============================================================
-   * 6. Start Retry Dispatcher
-   * ============================================================
+   * Retry Queues + DLQ
    */
-  await startRetryDispatcher(channel, {
-    retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix,
-    eventExchange: RABBITMQ_CONFIG.exchange,
-  });
+
+  await setupRetryQueues(
+    channel,
+    {
+      retryQueuePrefix:
+        RABBITMQ_CONFIG.retryQueuePrefix,
+
+      deadLetterQueue:
+        RABBITMQ_CONFIG.dlq,
+
+      deadLetterExchange:
+        RABBITMQ_CONFIG.deadLetterExchange,
+
+      dlqRoutingKey:
+        RABBITMQ_CONFIG.dlqRoutingKey,
+    }
+  );
+
 
   /*
-   * ============================================================
-   * 7. Backpressure
-   * ============================================================
+   * Retry Dispatcher
    */
+
+  await startRetryDispatcher(
+    channel,
+    {
+      retryQueuePrefix:
+        RABBITMQ_CONFIG.retryQueuePrefix,
+
+      eventExchange:
+        RABBITMQ_CONFIG.exchange,
+    }
+  );
+
+
+  /*
+   * Backpressure
+   */
+
   await channel.prefetch(10);
 
+
   /*
-   * ============================================================
-   * 8. Main Consumer
-   * ============================================================
+   * Main Consumer
    */
-  await channel.consume(queue.queue, async (message) => {
-    if (!message) return;
 
-    const routingKey = message.fields?.routingKey;
+  await channel.consume(
+    queue.queue,
 
-    console.log(`[Inventory Service] Event received: ${routingKey}`);
+    async (message) => {
 
-    /*
-       * --------------------------------------------------------
-       * OrderCreated
-       * --------------------------------------------------------
-       *
-       * Reserve inventory.
-       */
+      if (!message) return;
 
-      if (routingKey === "order.created") {
+
+      const routingKey =
+        message.fields?.routingKey;
+
+
+      console.log(
+        `[Inventory Service] Event received: ${routingKey}`
+      );
+
+
+      if (
+        routingKey ===
+        "order.created"
+      ) {
+
         await processMessageWithRetry(
           channel,
           message,
           reserveInventory,
-          { retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix }
+          {
+            retryQueuePrefix:
+              RABBITMQ_CONFIG.retryQueuePrefix,
+          }
         );
 
         return;
       }
 
-      /*
-       * --------------------------------------------------------
-       * PaymentFailed
-       * --------------------------------------------------------
-       *
-       * Release previously reserved inventory.
-       */
 
-      if (routingKey === "payment.failed") {
+      if (
+        routingKey ===
+        "payment.failed"
+      ) {
+
         await processMessageWithRetry(
           channel,
           message,
           processPaymentFailed,
-          { retryQueuePrefix: RABBITMQ_CONFIG.retryQueuePrefix }
+          {
+            retryQueuePrefix:
+              RABBITMQ_CONFIG.retryQueuePrefix,
+          }
         );
 
         return;
       }
 
+
       /*
-       * --------------------------------------------------------
        * Unknown Event
-       * --------------------------------------------------------
-       * Do not requeue an event that this service doesn't understand.
        */
 
-      console.warn(`[Inventory Service] Unknown routing key: ${routingKey}`);
+      console.warn(
+        `[Inventory Service] Unknown routing key: ${routingKey}`
+      );
 
-      channel.nack(message, false, false);
+
+      channel.nack(
+        message,
+        false,
+        false
+      );
     }
   );
 
-  console.log("[Inventory Service] Consumer started.");
+
+  console.log(
+    "[Inventory Service] Consumer started."
+  );
 };

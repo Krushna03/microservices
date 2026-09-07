@@ -1,27 +1,51 @@
 import { BusinessError } from "../errors/business-error.js";
-import { RETRY_CONFIG } from "./retry.config.js";
-import { getRetryAttempt, getNextRetryAttempt, getRetryDelay, getOriginalRoutingKey } from "./retry.js";
-import { publishToRetryQueue } from "./retry.publisher.js";
 
-export const processMessageWithRetry = async (channel, message, handler, {
+import { RETRY_CONFIG } from "./retry.config.js";
+
+import {
+  getRetryAttempt,
+  getNextRetryAttempt,
+  getRetryDelay,
+  getOriginalRoutingKey,
+} from "./retry.js";
+
+import {
+  publishToRetryQueue,
+} from "./retry.publisher.js";
+
+
+export const processMessageWithRetry = async (
+  channel,
+  message,
+  handler,
+  {
     retryQueuePrefix,
   }
 ) => {
+
   try {
+
     /*
      * Parse event.
      */
-    const event = JSON.parse(message.content.toString());
+
+    const event =
+      JSON.parse(
+        message.content.toString()
+      );
+
 
     /*
      * Execute business logic.
      */
+
     await handler(event);
 
+
     /*
-     * Business logic succeeded.
-     * Message is completely processed.
+     * Successfully processed.
      */
+
     channel.ack(message);
 
   } catch (error) {
@@ -30,60 +54,83 @@ export const processMessageWithRetry = async (channel, message, handler, {
      * ========================================================
      * BUSINESS ERROR
      * ========================================================
-     * Expected business failures should NOT retry.
-     * Examples:
-     * - Insufficient inventory
-     * - Payment declined
-     * - Invalid business state
+     *
+     * Business errors should not retry.
      */
-    if (error instanceof BusinessError || error?.isBusinessError) {
-      console.warn(`[RabbitMQ] Business failure: ${error.message}`);
 
-      /*
-       * ACK because retrying would not solve
-       * a business problem.
-       */
+    if (
+      error instanceof BusinessError ||
+      error?.isBusinessError
+    ) {
+
+      console.warn(
+        `[RabbitMQ] Business failure: ${error.message}`
+      );
+
+
       channel.ack(message);
 
       return;
     }
 
+
     /*
      * ========================================================
      * SYSTEM ERROR
      * ========================================================
-     * Examples:
-     * - MongoDB unavailable
-     * - MongoDB timeout
-     * - Network failure
-     * - Unexpected application error
      */
-    console.error("[RabbitMQ] System failure:", error);
 
-    const currentAttempt = getRetryAttempt(message);
-    
-    const nextAttempt = getNextRetryAttempt(currentAttempt);
+    console.error(
+      "[RabbitMQ] System failure:",
+      error
+    );
+
+
+    const currentAttempt =
+      getRetryAttempt(message);
+
+
+    const nextAttempt =
+      getNextRetryAttempt(
+        currentAttempt
+      );
+
 
     /*
      * ========================================================
      * ORIGINAL ROUTING KEY
      * ========================================================
+     *
+     * For the original message:
+     *
+     * message.fields.routingKey
+     *
+     * For a retry message:
+     *
+     * x-original-routing-key
      */
 
-    const originalRoutingKey = getOriginalRoutingKey(message);
+    const originalRoutingKey =
+      getOriginalRoutingKey(message) ||
+      message.fields?.routingKey;
 
-    /*
-     * If we don't know where this message
-     * originally came from, we cannot safely
-     * retry it.
-     */
+
     if (!originalRoutingKey) {
-      console.error("[RabbitMQ] Missing original routing key. Sending to DLQ.");
 
-      channel.nack(message, false, false);
+      console.error(
+        "[RabbitMQ] Missing original routing key. Sending to DLQ."
+      );
+
+
+      channel.nack(
+        message,
+        false,
+        false
+      );
 
       return;
     }
+
 
     /*
      * ========================================================
@@ -91,54 +138,93 @@ export const processMessageWithRetry = async (channel, message, handler, {
      * ========================================================
      */
 
-    if (nextAttempt <= RETRY_CONFIG.maxAttempts) {
+    if (
+      nextAttempt <=
+      RETRY_CONFIG.maxAttempts
+    ) {
 
-      const delay = getRetryDelay(nextAttempt);
+      const delay =
+        getRetryDelay(nextAttempt);
 
-      /*
-       * Defensive check.
-       */
+
       if (!delay) {
-        console.error(`[RabbitMQ] No retry delay configured for attempt ${nextAttempt}. Sending to DLQ.`);
-        channel.nack(message, false, false);
+
+        console.error(
+          `[RabbitMQ] No retry delay configured for attempt ${nextAttempt}. Sending to DLQ.`
+        );
+
+
+        channel.nack(
+          message,
+          false,
+          false
+        );
+
         return;
       }
 
-      const retryQueue = `${retryQueuePrefix}.${delay}ms`;
+
+      const retryQueue =
+        `${retryQueuePrefix}.${delay}ms`;
+
 
       try {
+
         /*
-         * Publish the failed message to the retry queue.
+         * Publish failed message
+         * to retry queue.
          */
+
         await publishToRetryQueue(
           channel,
+
           message,
+
           nextAttempt,
+
           retryQueue,
+
           originalRoutingKey
         );
 
+
         /*
-         * IMPORTANT:
-         * ACK the original only AFTER the retry message has been
-         * confirmed by RabbitMQ.
+         * ACK original only after
+         * retry publish is confirmed.
          */
+
         channel.ack(message);
 
-        console.log(`[RabbitMQ] Retry ${nextAttempt}/${RETRY_CONFIG.maxAttempts} scheduled after ${delay}ms`);
+
+        console.log(
+          `[RabbitMQ] Retry ${nextAttempt}/${RETRY_CONFIG.maxAttempts} scheduled after ${delay}ms`
+        );
 
       } catch (publishError) {
-        console.error("[RabbitMQ] Failed to publish retry:", publishError);
+
+        console.error(
+          "[RabbitMQ] Failed to publish retry:",
+          publishError
+        );
+
 
         /*
-         * Retry publishing failed.
-         * Keep original message alive.
+         * Retry publish failed.
+         *
+         * Keep original message.
          */
-        channel.nack(message, false, true);
+
+        channel.nack(
+          message,
+          false,
+          true
+        );
       }
+
 
       return;
     }
+
 
     /*
      * ========================================================
@@ -146,15 +232,24 @@ export const processMessageWithRetry = async (channel, message, handler, {
      * ========================================================
      */
 
-    console.error(`[RabbitMQ] Maximum retries (${RETRY_CONFIG.maxAttempts}) exceeded. Sending to DLQ.`);
+    console.error(
+      `[RabbitMQ] Maximum retries (${RETRY_CONFIG.maxAttempts}) exceeded. Sending to DLQ.`
+    );
+
 
     /*
-     * reject + requeue=false
-     * Because our main queue has:
+     * Main queue has:
+     *
      * x-dead-letter-exchange
-     * RabbitMQ will move the message
+     *
+     * RabbitMQ sends the message
      * to the service DLQ.
      */
-    channel.nack(message, false, false);
+
+    channel.nack(
+      message,
+      false,
+      false
+    );
   }
 };

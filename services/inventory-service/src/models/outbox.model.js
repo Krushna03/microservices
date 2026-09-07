@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
 
+
 const outboxSchema = new mongoose.Schema(
   {
     eventId: {
@@ -37,7 +38,6 @@ const outboxSchema = new mongoose.Schema(
         "pending",
         "processing",
         "published",
-        "failed",
       ],
       default: "pending",
       index: true,
@@ -61,25 +61,40 @@ const outboxSchema = new mongoose.Schema(
     correlationId: {
       type: String,
       required: true,
-      index:true
+      index: true,
     },
 
-    // Worker currently processing this event.
+    /*
+     * Worker that currently owns
+     * this event.
+     */
+
     lockedBy: {
       type: String,
       default: null,
       index: true,
     },
 
-    // When the worker acquired the lock.
+    /*
+     * Time at which the worker
+     * acquired the event.
+     */
+
     lockedAt: {
       type: Date,
       default: null,
+      index: true,
     },
   },
+
   {
     timestamps: true,
   }
 );
 
-export const Outbox = mongoose.model("Outbox", outboxSchema);
+
+export const Outbox =
+  mongoose.model(
+    "Outbox",
+    outboxSchema
+  );

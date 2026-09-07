@@ -1,78 +1,164 @@
 import crypto from "crypto";
-import { markPublished, markFailed, claimPendingOutboxEvents } from "../repositories/outbox.repository.js";
-import { publishEvent } from "../messaging/publisher.js";
 
-const WORKER_ID = `inventory-outbox-${crypto.randomUUID()}`;
-const BATCH_SIZE = 100;
-const LOCK_DURATION_MS = 60_000;
+import {
+  claimNextOutboxEvent,
+  markPublished,
+  markFailed,
+} from "../repositories/outbox.repository.js";
 
-const calculateNextAttempt = (attempts) => {
-  const delay = Math.min(1000 * Math.pow(2, attempts), 60_000);
-  return new Date(Date.now() + delay);
+import {
+  publishEvent,
+} from "../messaging/publisher.js";
+
+
+const EVENT_ROUTING_KEYS = {
+  InventoryReserved:
+    "inventory.reserved",
+
+  InventoryReservationFailed:
+    "inventory.reservation_failed",
+
+  InventoryReleased:
+    "inventory.released",
 };
 
+
+const calculateNextAttempt = (
+  attempts
+) => {
+
+  const delay = Math.min(
+    1000 * Math.pow(2, attempts),
+    60000
+  );
+
+  return new Date(
+    Date.now() + delay
+  );
+};
+
+
 export const processOutbox = async () => {
-  const events = await claimPendingOutboxEvents(BATCH_SIZE, WORKER_ID, LOCK_DURATION_MS);
 
-  if (events.length === 0) {
-    return;
-  }
+  const workerId =
+    `inventory-worker-${crypto.randomUUID()}`;
 
-  console.log(`[Inventory Outbox] Worker ${WORKER_ID} claimed ${events.length} events`);
 
-  for (const event of events) {
+  /*
+   * Process up to 100 events
+   * during one worker cycle.
+   */
+
+  for (let i = 0; i < 100; i++) {
+
+    /*
+     * Atomically claim an event.
+     */
+
+    const event =
+      await claimNextOutboxEvent(
+        workerId
+      );
+
+
+    /*
+     * No more events available.
+     */
+
+    if (!event) {
+      break;
+    }
+
+
     try {
-      console.log(`[Inventory Outbox] Publishing event ${event.eventId} (${event.eventType})`);
+
+      const routingKey =
+        EVENT_ROUTING_KEYS[
+          event.eventType
+        ];
+
+
+      if (!routingKey) {
+
+        throw new Error(
+          `Unknown event type: ${event.eventType}`
+        );
+      }
+
+
+      /*
+       * Publish to RabbitMQ.
+       */
 
       await publishEvent({
-        routingKey: getRoutingKey(event.eventType),
+
+        routingKey,
+
         event: {
-          eventId: event.eventId,
-          eventType: event.eventType,
-          correlationId: event.correlationId,
-          occurredAt: event.createdAt,
-          aggregateType: event.aggregateType,
-          aggregateId: event.aggregateId,
-          payload: event.payload,
+          eventId:
+            event.eventId,
+
+          eventType:
+            event.eventType,
+
+          occurredAt:
+            event.createdAt,
+
+          aggregateType:
+            event.aggregateType,
+
+          aggregateId:
+            event.aggregateId,
+
+          correlationId:
+            event.correlationId,
+
+          payload:
+            event.payload,
         },
       });
 
-      const result = await markPublished(event.eventId, WORKER_ID);
 
-      if (result.modifiedCount === 0) {
-        console.warn(`[Inventory Outbox] Event ${event.eventId} was published but worker no longer owns the lock.`);
-        continue;
-      }
+      /*
+       * Only mark published
+       * after RabbitMQ confirms.
+       */
 
-      console.log(`[Inventory Outbox] Successfully processed event ${event.eventId}`);
+      await markPublished(
+        event.eventId,
+        workerId
+      );
+
+
+      console.log(
+        `[Inventory Outbox] Published ${event.eventId}`
+      );
 
     } catch (error) {
-      console.error(`[Inventory Outbox] Failed to publish ${event.eventId}:`, error);
 
-      const nextAttemptAt = calculateNextAttempt(event.attempts);
+      console.error(
+        `[Inventory Outbox] Failed ${event.eventId}:`,
+        error
+      );
 
-      await markFailed(event.eventId, WORKER_ID, nextAttemptAt);
 
-      console.log(`[Inventory Outbox] Retry scheduled for ${event.eventId} at ${nextAttemptAt.toISOString()}`);
+      const nextAttemptAt =
+        calculateNextAttempt(
+          event.attempts
+        );
+
+
+      await markFailed(
+        event.eventId,
+
+        workerId,
+
+        nextAttemptAt
+      );
     }
   }
 };
 
-const getRoutingKey = (eventType) => {
-  const mapping = {
-    InventoryReserved: "inventory.reserved",
-    InventoryReservationFailed: "inventory.reservation_failed",
-    InventoryReleased: "inventory.released",
-  };
-
-  const routingKey = mapping[eventType];
-
-  if (!routingKey) {
-    throw new Error(`Unknown event type: ${eventType}`);
-  }
-
-  return routingKey;
-};
 
 export const startOutboxWorker = (intervalMs = 3000) => {
   console.log("Starting Inventory Service Outbox Worker...");

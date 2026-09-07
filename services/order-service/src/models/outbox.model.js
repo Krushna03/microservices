@@ -37,7 +37,6 @@ const outboxSchema = new mongoose.Schema(
         "pending",
         "processing",
         "published",
-        "failed",
       ],
       default: "pending",
       index: true,

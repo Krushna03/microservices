@@ -1,22 +1,39 @@
 import mongoose from "mongoose";
-import * as inventoryRepository from "../repositories/inventory.repository.js";
-import { findProcessedEvent, createProcessedEvent, } from "../repositories/event.repository.js";
-import { Outbox } from "../models/outbox.model.js";
-import { BusinessError } from "../../../shared/errors/business-error.js";
+import crypto from "crypto";
 
-/**
- * Reserve inventory for an OrderCreated event.
- * Business failure:
- * - Insufficient inventory
- * - Inventory not found
- 
- * System failure:
- * - MongoDB timeout
- * - Database connection failure
- * - Unexpected application error
- 
- * Business failures are converted into InventoryReservationFailed.
- * System failures are re-thrown so RabbitMQ can retry the message.
+import * as inventoryRepository from "../repositories/inventory.repository.js";
+import * as reservationRepository from "../repositories/reservation.repository.js";
+
+import {
+  findProcessedEvent,
+  createProcessedEvent,
+} from "../repositories/event.repository.js";
+
+import {
+  createOutboxEvent,
+} from "../repositories/outbox.repository.js";
+
+import {
+  BusinessError,
+} from "../../../../shared/errors/business-error.js";
+
+
+/*
+ * ============================================================
+ * RESERVE INVENTORY
+ * ============================================================
+ *
+ * OrderCreated
+ *     ↓
+ * Inventory Service
+ *     ↓
+ * Reserve stock
+ *     ↓
+ * Create reservation
+ *     ↓
+ * Create InventoryReserved Outbox event
+ *     ↓
+ * Mark OrderCreated processed
  */
 export const reserveInventory = async (event) => {
   const session = await mongoose.startSession();
@@ -26,87 +43,198 @@ export const reserveInventory = async (event) => {
 
     await session.withTransaction(async () => {
 
-      // 1. Idempotency Check
-      const alreadyProcessed = await findProcessedEvent(event.eventId, session);
+      /*
+       * 1. Idempotency check
+       */
+      const alreadyProcessed =
+        await findProcessedEvent(
+          event.eventId,
+          session
+        );
 
       if (alreadyProcessed) {
-        console.log(`[Inventory Service] Event already processed: ${event.eventId}`);
-        result = { alreadyProcessed: true, };
+        result = {
+          alreadyProcessed: true,
+        };
+
         return;
       }
 
-      // 2. Extract Data
-      const { orderId, userId, amount, items, } = event.payload;
+
+      /*
+       * 2. Extract event data
+       */
+      const {
+        orderId,
+        userId,
+        amount,
+        items,
+      } = event.payload;
+
 
       try {
-        // 3. Reserve Inventory
-        const reservedItems = await inventoryRepository.reserveInventory(items, session);
 
-        // 4. Create InventoryReserved event
-        await Outbox.create(
-          [
-            {
-              eventId: new mongoose.Types.ObjectId().toString(),
-              eventType: "InventoryReserved",
-              correlationId: event.correlationId,
-              aggregateType: "Inventory",
-              aggregateId: orderId,
-              payload: {
-                orderId,
-                userId,
-                amount,
-                items: reservedItems,
-              },
-            },
-          ],
+        /*
+         * 3. Check whether reservation
+         * already exists.
+         *
+         * This protects against duplicate
+         * OrderCreated events.
+         */
+        const existingReservation =
+          await reservationRepository.findByOrderId(
+            orderId,
+            session
+          );
+
+        if (existingReservation) {
+
+          await createProcessedEvent(
+            event,
+            session
+          );
+
+          result = {
+            alreadyReserved: true,
+            orderId,
+          };
+
+          return;
+        }
+
+
+        /*
+         * 4. Reserve inventory
+         */
+        const reservedItems =
+          await inventoryRepository.reserveInventory(
+            items,
+            session
+          );
+
+
+        /*
+         * 5. Create reservation record
+         */
+        await reservationRepository.createReservation(
           {
-            session,
-          }
+            orderId,
+            items: reservedItems,
+            status: "reserved",
+          },
+          session
         );
 
-        // 5. Mark incoming event as processed
-        await createProcessedEvent(event, session);
+
+        /*
+         * 6. Create InventoryReserved
+         * Outbox event.
+         */
+        await createOutboxEvent(
+          {
+            eventId: crypto.randomUUID(),
+
+            eventType:
+              "InventoryReserved",
+
+            correlationId:
+              event.correlationId,
+
+            aggregateType:
+              "InventoryReservation",
+
+            aggregateId:
+              orderId,
+
+            payload: {
+              orderId,
+              userId,
+              amount,
+              items: reservedItems,
+            },
+          },
+          session
+        );
+
+
+        /*
+         * 7. Mark incoming event
+         * as processed.
+         */
+        await createProcessedEvent(
+          event,
+          session
+        );
+
 
         result = {
           success: true,
           orderId,
+          items: reservedItems,
         };
 
       } catch (error) {
-        /*
-         * BUSINESS FAILURE
-         * Example:
-         * - Insufficient inventory
-         * - Inventory not found
-         * These should NOT be retried.
-         */
-        if (error instanceof BusinessError || error.isBusinessError) {
-          console.warn(`[Inventory Service] Business failure: ${error.message}`);
 
-          // Create failure event in the SAME transaction.
-          await Outbox.create(
-            [
-              {
-                eventId: new mongoose.Types.ObjectId().toString(),
-                eventType: "InventoryReservationFailed",
-                correlationId: event.correlationId,
-                aggregateType: "Inventory",
-                aggregateId: orderId,
-                payload: {
-                  orderId,
-                  userId,
-                  reason: error.message,
-                  code: error.code,
-                },
-              },
-            ],
-            {
-              session,
-            }
+        /*
+         * ====================================================
+         * BUSINESS FAILURE
+         * ====================================================
+         *
+         * Example:
+         * - Product doesn't exist
+         * - Insufficient inventory
+         *
+         * Do NOT retry.
+         */
+        if (
+          error instanceof BusinessError ||
+          error?.isBusinessError
+        ) {
+
+          console.warn(
+            `[Inventory Service] Business failure: ${error.message}`
           );
 
-          // Mark incoming event as processed.
-          await createProcessedEvent(event, session);
+
+          /*
+           * Create compensation event
+           * inside the SAME transaction.
+           */
+          await createOutboxEvent(
+            {
+              eventId: crypto.randomUUID(),
+
+              eventType:
+                "InventoryReservationFailed",
+
+              correlationId:
+                event.correlationId,
+
+              aggregateType:
+                "InventoryReservation",
+
+              aggregateId:
+                orderId,
+
+              payload: {
+                orderId,
+                userId,
+                reason: error.message,
+                code: error.code,
+              },
+            },
+            session
+          );
+
+
+          /*
+           * Mark OrderCreated processed.
+           */
+          await createProcessedEvent(
+            event,
+            session
+          );
+
 
           result = {
             success: false,
@@ -118,102 +246,45 @@ export const reserveInventory = async (event) => {
           return;
         }
 
+
         /*
+         * ====================================================
          * SYSTEM FAILURE
+         * ====================================================
          *
-         * Example:
-         * - MongoDB timeout
-         * - Database unavailable
-         * - Network failure
-         * - Unexpected error
+         * Rollback transaction.
          *
-         * DO NOT create InventoryReservationFailed.
-         *
-         * Re-throw so the RabbitMQ shared processor
-         * can retry the original message.
+         * Shared RabbitMQ retry mechanism
+         * will retry the event.
          */
         throw error;
       }
     });
 
     return result;
+
   } finally {
     await session.endSession();
   }
 };
 
 
-/**
- * Release inventory.
- * This is triggered when an order needs its reserved
- * inventory released, for example after payment failure.
- */
-export const releaseInventory = async (event) => {
-  const session = await mongoose.startSession();
-
-  try {
-    let result;
-
-    await session.withTransaction(async () => {
-      // 1. Idempotency Check
-      const alreadyProcessed =
-        await findProcessedEvent(
-          event.eventId,
-          session
-        );
-
-      if (alreadyProcessed) {
-        console.log(`[Inventory Service] Event already processed: ${event.eventId}`);
-        result = { alreadyProcessed: true };
-        return;
-      }
-
-      // 2. Extract Data
-      const { orderId, items, reason, } = event.payload;
-
-      // 3. Release Inventory
-      const releasedItems = await inventoryRepository.releaseInventory(items, session);
-
-      // 4. Create InventoryReleased event
-      await Outbox.create(
-        [
-          {
-            eventId: new mongoose.Types.ObjectId().toString(),
-            eventType: "InventoryReleased",
-            correlationId: event.correlationId,
-            aggregateType: "Inventory",
-            aggregateId: orderId,
-            payload: {
-              orderId,
-              items: releasedItems,
-              reason,
-            },
-          },
-        ],
-        {
-          session,
-        }
-      );
-
-      // 5. Mark incoming event as processed
-      await createProcessedEvent(event, session);
-
-      result = {
-        success: true,
-        orderId,
-      };
-    });
-
-    return result;
-  } finally {
-    await session.endSession();
-  }
-};
-
-
-/**
- * Handle PaymentFailed event.
- * Payment failed -> release previously reserved inventory.
+/*
+ * ============================================================
+ * PROCESS PAYMENT FAILED
+ * ============================================================
+ *
+ * PaymentFailed
+ *     ↓
+ * Inventory Service
+ *     ↓
+ * Release reservation
+ *     ↓
+ * Restore stock
+ *     ↓
+ * Create InventoryReleased Outbox
+ *     ↓
+ * Mark PaymentFailed processed
  */
 export const processPaymentFailed = async (event) => {
   const session = await mongoose.startSession();
@@ -223,52 +294,150 @@ export const processPaymentFailed = async (event) => {
 
     await session.withTransaction(async () => {
 
-      // 1. Idempotency Check
-      const alreadyProcessed = await findProcessedEvent(event.eventId, session);
+      /*
+       * 1. Idempotency check
+       */
+      const alreadyProcessed =
+        await findProcessedEvent(
+          event.eventId,
+          session
+        );
 
       if (alreadyProcessed) {
-        console.log(`[Inventory Service] Event already processed: ${event.eventId}`);
-        result = { alreadyProcessed: true };
+
+        result = {
+          alreadyProcessed: true,
+        };
+
         return;
       }
 
-      // 2. Extract Data
-      const { orderId, items, reason, } = event.payload;
 
-      // 3. Release Inventory
-      const releasedItems = await inventoryRepository.releaseInventory(items, session);
+      /*
+       * 2. Extract event data
+       */
+      const {
+        orderId,
+        reason
+      } = event.payload;
 
-      // 4. Create InventoryReleased event
-      await Outbox.create(
-        [
-          {
-            eventId: new mongoose.Types.ObjectId().toString(),
-            eventType: "InventoryReleased",
-            aggregateType: "Inventory",
-            aggregateId: orderId,
-            payload: {
-              orderId,
-              items: releasedItems,
-              reason,
-            },
-          },
-        ],
-        {
-          session,
-        }
+
+      /*
+       * 3. Find reservation
+       */
+      const reservation =
+        await reservationRepository.findByOrderId(
+          orderId,
+          session
+        );
+
+
+      /*
+       * If reservation doesn't exist,
+       * this is a business/state problem.
+       */
+      if (!reservation) {
+
+        throw new BusinessError(
+          `Inventory reservation not found for order ${orderId}`,
+          "RESERVATION_NOT_FOUND"
+        );
+      }
+
+
+      /*
+       * Already released.
+       *
+       * Treat as idempotent operation.
+       */
+      if (reservation.status === "released") {
+
+        await createProcessedEvent(
+          event,
+          session
+        );
+
+        result = {
+          alreadyReleased: true,
+          orderId,
+        };
+
+        return;
+      }
+
+
+      /*
+       * 4. Release the reserved inventory.
+       *
+       * Prefer the reservation snapshot rather
+       * than trusting the PaymentFailed payload.
+       */
+      const releasedItems =
+        await inventoryRepository.releaseInventory(
+          reservation.items,
+          session
+        );
+
+
+      /*
+       * 5. Mark reservation released.
+       */
+      await reservationRepository.markReleased(
+        orderId,
+        session
       );
 
-      // 5. Mark incoming event as processed
-      await createProcessedEvent(event, session);
+
+      /*
+       * 6. Create InventoryReleased
+       * Outbox event.
+       */
+      await createOutboxEvent(
+        {
+          eventId: crypto.randomUUID(),
+
+          eventType:
+            "InventoryReleased",
+
+          correlationId:
+            event.correlationId,
+
+          aggregateType:
+            "InventoryReservation",
+
+          aggregateId:
+            orderId,
+
+          payload: {
+            orderId,
+            items: releasedItems,
+            reason:
+              reason ||
+              "Payment failed",
+          },
+        },
+        session
+      );
+
+
+      /*
+       * 7. Mark PaymentFailed processed.
+       */
+      await createProcessedEvent(
+        event,
+        session
+      );
+
 
       result = {
         success: true,
         orderId,
+        items: releasedItems,
       };
     });
 
     return result;
-    
+
   } finally {
     await session.endSession();
   }

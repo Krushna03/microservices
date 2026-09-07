@@ -1,59 +1,15 @@
-import amqp from "amqplib";
 import env from "../config/env.js";
+import {
+  connectRabbitMQ as connectSharedRabbitMQ,
+  getChannel as getSharedChannel,
+} from "../../../../shared/rabbitmq/rabbitmq.js";
 
-let connection;
-let channel;
 
 export const connectRabbitMQ = async () => {
-  if (channel) return channel;
-
-  connection = await amqp.connect(env.RABBITMQ_URL);
-
-  // Confirm channel ensure publisher receive successfull message delivery confirmation before message delivery to next
-  channel = await connection.createConfirmChannel();
-
-  connection.on("error", (error) => {
-    console.error("RabbitMQ connection error:", error);
-  });
-
-  connection.on("close", () => {
-    console.error("RabbitMQ connection closed");
-    channel = null;
-    connection = null;
-  });
-
-  channel.on("error", (error) => {
-    console.error("RabbitMQ channel error:", error);
-  });
-
-  await channel.assertExchange(
-    "writing.events",
-    "topic",
-    {
-      durable: true,
-    }
-  );
-
-  await channel.assertExchange(
-    "writing.events.dlx",
-    "topic",
-    {
-      durable: true,
-    }
-  );
-
-  console.log("RabbitMQ connected");
-
-  return channel;
+  return connectSharedRabbitMQ(env.RABBITMQ_URL);
 };
 
 
 export const getChannel = () => {
-  if (!channel) {
-    throw new Error(
-      "RabbitMQ channel is not initialized"
-    );
-  }
-
-  return channel;
+  return getSharedChannel();
 };

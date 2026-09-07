@@ -1,8 +1,9 @@
+import mongoose from "mongoose";
 import { Payment } from "../models/payment.model.js";
 
 
 export const findByOrderId = async (orderId, session = null) => {
-   const query = Payment.findOne({ orderId })
+   const query = Payment.findOne({ orderId });
 
    if (session) {
       query.session(session);
@@ -13,8 +14,7 @@ export const findByOrderId = async (orderId, session = null) => {
 
 
 export const findByPaymentId = async (paymentId, session = null) => {
-
-  const query = await Payment.findOne({ paymentId });
+  const query = Payment.findOne({ paymentId });
 
   if (session) {
     query.session(session);
@@ -28,13 +28,16 @@ export const createPayment = async (paymentData, session) => {
    const [payment] = await Payment.create([paymentData], { session });
 
    return payment.toObject();
-}
+};
 
 
 export const makePaymentCompleted = async (paymentId, transactionId, session) => {
+  const filter = mongoose.isValidObjectId(paymentId)
+    ? { $or: [{ _id: paymentId }, { paymentId: String(paymentId) }], status: "pending" }
+    : { paymentId, status: "pending" };
 
   const payment = await Payment.findOneAndUpdate(
-    { paymentId, status: "pending" },
+    filter,
     {
       $set: {
         status: "completed",
@@ -43,32 +46,35 @@ export const makePaymentCompleted = async (paymentId, transactionId, session) =>
       },
     },
     {
-      new: true,
+      returnDocument: "after",
       session,
       runValidators: true,
     }
   ).lean();
 
   return payment;
-}
+};
 
 
 export const makePaymentFailed = async (paymentId, reason, session) => {
-  
+  const filter = mongoose.isValidObjectId(paymentId)
+    ? { $or: [{ _id: paymentId }, { paymentId: String(paymentId) }], status: "pending" }
+    : { paymentId, status: "pending" };
+
   const payment = await Payment.findOneAndUpdate(
-    { paymentId, status: "pending" },
+    filter,
     {
       $set: {
         status: "failed",
-        failureReason: reason
-      }
+        failureReason: reason,
+      },
     },
     {
-      new: true,
+      returnDocument: "after",
       session,
       runValidators: true,
     }
   ).lean();
 
   return payment;
-}
+};

@@ -1,6 +1,7 @@
 import { createProcessedEvent, findProcessedEvent } from "../repositories/event.repository.js";
 import * as orderRepository from "../repositories/order.repository.js";
 import mongoose from "mongoose";
+import { processPaymentSucceeded, processInventoryReleased } from "../services/order.service.js";
 
 
 const processEvent = async (event, handler) => {
@@ -29,24 +30,12 @@ const processEvent = async (event, handler) => {
 
 
 export const handlePaymentSucceeded = async (event) => {
-  await processEvent(event, async (event, session) => {
-    const { orderId } = event.payload;
-
-    console.log(`[Order Service] Payment succeeded for order: ${orderId}. Confirming order.`);
-
-    await orderRepository.confirmOrder(orderId, session);
-  })
+  return await processEvent(event, processPaymentSucceeded);
 };
 
 
 export const handleInventoryReleased = async (event) => {
-  await processEvent(event, async (event, session) => {
-    const { orderId, reason } = event.payload;
-
-    console.log(`[Order Service] Inventory released for order: ${orderId}. Cancelling order.`);
-
-    await orderRepository.cancelOrder(orderId, reason || "Payment failed", session);
-  })
+  return await processEvent(event, processInventoryReleased);
 };
 
 

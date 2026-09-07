@@ -1,5 +1,5 @@
 import { Inventory } from "../models/inventory.model.js";
-import { BusinessError } from "../../../shared/errors/business-error.js";
+import { BusinessError } from "../../../../shared/errors/business-error.js";
 
 
 export const findByProductId = async (productId, session = null) => {

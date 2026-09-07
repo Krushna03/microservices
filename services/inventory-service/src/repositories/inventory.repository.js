@@ -1,5 +1,5 @@
 import { Inventory } from "../models/inventory.model.js";
-import { BusinessError } from "../../../shared/errors/business-error.js";
+import { BusinessError } from "../../../../shared/errors/business-error.js";
 
 
 export const findByProductId = async (productId, session = null) => {
@@ -27,7 +27,7 @@ export const reserveInventory = async (items, session) => {
           reservedQuantity: item.quantity,
         }
       },
-      { new: true, session, runValidators: true }
+      { returnDocument: "after", session, runValidators: true }
     ).lean();
 
     if (!inventory) {
@@ -54,7 +54,7 @@ export const releaseInventory = async (items, session) => {
           availableQuantity: item.quantity,
         }
       },
-      { new: true, session, runValidators: true }
+      { returnDocument: "after", session, runValidators: true }
     ).lean();
 
     if (!inventory) {
