@@ -1,0 +1,55 @@
+===================================================================
+SAGA CHOREOGRAPHY & COMPENSATION FLOW
+===================================================================
+
+--- 1. SUCCESS FLOW ---
+Order Service:
+  - order-service/src/services/order.service.js
+    (Creates Order [status: pending] & writes Outbox record)
+  - order-service/src/workers/outbox.worker.js
+    (Publishes Event: 'order.created')
+
+Inventory Service:
+  - inventory-service/src/messaging/consumer.js
+    (Receives 'order.created')
+  - inventory-service/src/messaging/order.handlers.js
+  - inventory-service/src/services/inventory.service.js
+    (Reserves stock & saves InventoryReservation [status: reserved])
+    (Publishes Event: 'inventory.reserved')
+
+Payment Service:
+  - payment-service/src/messaging/consumer.js
+    (Receives 'inventory.reserved')
+  - payment-service/src/messaging/inventory.handlers.js
+  - payment-service/src/services/payment.service.js
+    (Processes Payment -> status: completed)
+    (Publishes Event: 'payment.succeeded')
+
+Order Service:
+  - order-service/src/messaging/consumer.js
+    (Receives 'payment.succeeded')
+  - order-service/src/messaging/payment.handlers.js
+  - order-service/src/repositories/order.repository.js
+    (Confirms Order -> status: confirmed)
+
+
+--- 2. COMPENSATION FLOW (Payment Failure) ---
+Payment Service:
+  - payment-service/src/services/payment.service.js
+    (Payment declined -> status: failed)
+    (Publishes Event: 'payment.failed')
+
+Inventory Service:
+  - inventory-service/src/messaging/consumer.js
+    (Receives 'payment.failed')
+  - inventory-service/src/messaging/order.handlers.js
+  - inventory-service/src/services/inventory.service.js
+    (Releases reserved stock & sets InventoryReservation status: released)
+    (Publishes Event: 'inventory.released')
+
+Order Service:
+  - order-service/src/messaging/consumer.js
+    (Receives 'inventory.released')
+  - order-service/src/messaging/payment.handlers.js
+  - order-service/src/repositories/order.repository.js
+    (Cancels Order -> status: cancelled, cancelReason: "Payment failed")

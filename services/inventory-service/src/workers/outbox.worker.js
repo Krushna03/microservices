@@ -1,25 +1,17 @@
 import crypto from "crypto";
-
+import logger from "../config/logger.js";
+import { publishEvent } from "../messaging/publisher.js";
 import {
   claimNextOutboxEvent,
   markPublished,
   markFailed,
 } from "../repositories/outbox.repository.js";
 
-import {
-  publishEvent,
-} from "../messaging/publisher.js";
-
 
 const EVENT_ROUTING_KEYS = {
-  InventoryReserved:
-    "inventory.reserved",
-
-  InventoryReservationFailed:
-    "inventory.reservation_failed",
-
-  InventoryReleased:
-    "inventory.released",
+  InventoryReserved:"inventory.reserved",
+  InventoryReservationFailed: "inventory.reservation_failed",
+  InventoryReleased: "inventory.released",
 };
 
 
@@ -40,8 +32,7 @@ const calculateNextAttempt = (
 
 export const processOutbox = async () => {
 
-  const workerId =
-    `inventory-worker-${crypto.randomUUID()}`;
+  const workerId = `inventory-worker-${crypto.randomUUID()}`;
 
 
   /*
@@ -55,11 +46,7 @@ export const processOutbox = async () => {
      * Atomically claim an event.
      */
 
-    const event =
-      await claimNextOutboxEvent(
-        workerId
-      );
-
+    const event = await claimNextOutboxEvent(workerId);
 
     /*
      * No more events available.
@@ -129,44 +116,44 @@ export const processOutbox = async () => {
         workerId
       );
 
-
-      console.log(
-        `[Inventory Outbox] Published ${event.eventId}`
-      );
-
-    } catch (error) {
-
-      console.error(
-        `[Inventory Outbox] Failed ${event.eventId}:`,
-        error
-      );
-
-
-      const nextAttemptAt =
-        calculateNextAttempt(
-          event.attempts
-        );
-
-
-      await markFailed(
-        event.eventId,
-
+      logger.info({
+        eventId: event.eventId,
+        eventType: event.eventType,
+        routingKey,
+        aggregateId: event.aggregateId,
+        correlationId: event.correlationId,
         workerId,
-
-        nextAttemptAt
+      }, 
+        "Inventory outbox event published" 
       );
+    } catch (error) {
+      logger.error({
+        eventId: event.eventId,
+        eventType: event.eventType,
+        aggregateId: event.aggregateId,
+        correlationId: event.correlationId,
+        workerId,
+        error: error.message
+      },
+        "Inventory outbox event failed " + error
+      );
+
+      const nextAttemptAt = calculateNextAttempt(event.attempts);
+
+      await markFailed(event.eventId, workerId, nextAttemptAt);
     }
   }
 };
 
 
 export const startOutboxWorker = (intervalMs = 3000) => {
-  console.log("Starting Inventory Service Outbox Worker...");
+  logger.info( { intervalMs, }, "Starting Inventory Service Outbox Worker" );
+
   setInterval(async () => {
     try {
       await processOutbox();
     } catch (error) {
-      console.error("Inventory Outbox worker error:", error);
+      logger.error({ err: error }, "Inventory Outbox worker error:");
     }
   }, intervalMs);
 };

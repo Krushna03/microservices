@@ -8,10 +8,14 @@ export const chargePayment = async ({
   amount,
 }) => {
 
-  console.log(
-    `[Payment Provider] Charging payment ${paymentId} for order ${orderId}`
+  logger.info(
+    {
+      paymentId,
+      orderId,
+      amount,
+    },
+    "Calling payment provider"
   );
-
 
   /*
    * Simulate network latency.
@@ -29,7 +33,15 @@ export const chargePayment = async ({
 
 
   if (!successful) {
-
+     logger.warn(
+      {
+        paymentId,
+        orderId,
+        amount,
+      },
+      "Payment provider declined payment"
+    );
+    
     /*
      * Payment was explicitly declined.
      *
@@ -42,6 +54,14 @@ export const chargePayment = async ({
     );
   }
 
+    logger.info(
+    {
+      paymentId,
+      orderId,
+      transactionId,
+    },
+    "Payment provider approved payment"
+  );
 
   return {
     success: true,

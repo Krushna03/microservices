@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { markPublished, markFailed, claimPendingOutboxEvents } from "../repositories/outbox.repository.js";
 import { publishEvent } from "../messaging/publisher.js";
+import logger from "../config/logger.js";
 
 const WORKER_ID = `payment-outbox-${crypto.randomUUID()}`;
 
@@ -22,11 +23,24 @@ export const processOutbox = async () => {
     return;
   }
 
-  console.log(`[Outbox] Worker ${WORKER_ID} claimed ${events.length} events`);
+  logger.info(
+    {
+      workerId: WORKER_ID,
+      eventCount: events.length,
+    },
+    "Payment Outbox worker claimed events"
+  );
   
   for (const event of events) {
     try {
-      console.log( `[Outbox] Publishing event ${event.eventId} (${event.eventType})`);
+      logger.info(
+        {
+          eventId: event.eventId,
+          eventType: event.eventType,
+          workerId: WORKER_ID,
+        },
+        "Payment Outbox publishing event"
+      );
       
       await publishEvent({
         routingKey: getRoutingKey(event.eventType),
@@ -45,21 +59,48 @@ export const processOutbox = async () => {
       const result = await markPublished(event.eventId, WORKER_ID);
 
       if (result.modifiedCount === 0) {
-        console.warn(`[Outbox] Event ${event.eventId} was published but worker no longer owns the lock.`);
-
+         logger.warn(
+          {
+            eventId: event.eventId,
+            workerId: WORKER_ID,
+          },
+          "Payment Outbox event published but worker no longer owns the lock"
+        );
         continue;
       }
 
-      console.log(`[Outbox] Successfully processed event ${event.eventId}`);
+      logger.info(
+        {
+          eventId: event.eventId,
+          eventType: event.eventType,
+          workerId: WORKER_ID,
+        },
+        "Payment Outbox event published successfully"
+      );
     
     } catch (error) {
-      console.error(`[Outbox] Failed to publish ${event.eventId}:`, error);
+      logger.error(
+        {
+          err: error,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          workerId: WORKER_ID,
+        },
+        "Payment Outbox failed to publish event"
+      );
 
       const nextAttemptAt = calculateNextAttempt(event.attempts);
 
       await markFailed(event.eventId, WORKER_ID, nextAttemptAt);
 
-      console.log(`[Outbox] Retry scheduled for ${event.eventId} at ${nextAttemptAt.toISOString()}`);
+      logger.warn(
+        {
+          eventId: event.eventId,
+          nextAttemptAt,
+          workerId: WORKER_ID,
+        },
+        "Payment Outbox retry scheduled"
+      );
     }
   }
 };
@@ -86,7 +127,13 @@ export const startOutboxWorker = () => {
     try {
       await processOutbox();
     } catch (error) {
-      console.error("[Outbox] Worker cycle failed:", error);
+      logger.error(
+        {
+          err: error,
+          workerId: WORKER_ID,
+        },
+        "Payment Outbox worker cycle failed"
+      );
     }
   };
 
@@ -96,5 +143,11 @@ export const startOutboxWorker = () => {
   // Then periodically check for new events.
   setInterval(run, 5000);
 
-  console.log(`[Outbox] Worker started: ${WORKER_ID}`);
+  logger.info(
+    {
+      workerId: WORKER_ID,
+      intervalMs: 5000,
+    },
+    "Payment Outbox worker started"
+  );
 };

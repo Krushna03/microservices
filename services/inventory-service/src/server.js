@@ -3,6 +3,7 @@ import connectDB from "./config/db.js";
 import env from "./config/env.js";
 import { startConsumer } from "./messaging/consumer.js";
 import { startOutboxWorker } from "./workers/outbox.worker.js";
+import logger from "./config/logger.js";
 
 const PORT = env.PORT || 3003;
 
@@ -13,17 +14,20 @@ const startServer = async () => {
     try {
       await startConsumer();
     } catch (rabbitErr) {
-      console.warn("RabbitMQ Connection Failed:", rabbitErr.message);
-      console.warn("Inventory Service running (RabbitMQ offline)");
+      logger.warn({ err: rabbitErr }, 
+        "RabbitMQ connection failed. Inventory Service running with RabbitMQ offline");
     }
 
     startOutboxWorker();
 
+    logger.info("Inventory Service outbox worker started");
+
     app.listen(PORT, () => {
-      console.log(`Inventory Service running on port ${PORT}`);
+      logger.info(`Inventory Service running on port ${PORT}`);
     });
-  } catch (error) {
-    console.error("Failed to start Inventory Service", error);
+  } 
+  catch (error) {
+    logger.fatal({ err: error }, "Failed to start Inventory Service");
     process.exit(1);
   }
 };

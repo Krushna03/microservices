@@ -20,7 +20,7 @@ import {
 import {
   RABBITMQ_CONFIG,
 } from "./rabbitmq.config.js";
-
+import logger from "../config/logger.js";
 
 export const startConsumer = async () => {
 
@@ -152,11 +152,10 @@ export const startConsumer = async () => {
       const routingKey =
         message.fields?.routingKey;
 
-
-      console.log(
-        `[Inventory Service] Event received: ${routingKey}`
+      logger.info(
+        { routingKey },
+        "Inventory Service event received"
       );
-
 
       if (
         routingKey ===
@@ -200,10 +199,10 @@ export const startConsumer = async () => {
        * Unknown Event
        */
 
-      console.warn(
-        `[Inventory Service] Unknown routing key: ${routingKey}`
+      logger.warn( 
+        { routingKey }, 
+        "Inventory Service received unknown routing key" 
       );
-
 
       channel.nack(
         message,
@@ -214,7 +213,8 @@ export const startConsumer = async () => {
   );
 
 
-  console.log(
-    "[Inventory Service] Consumer started."
+  logger.info( 
+    { queue: RABBITMQ_CONFIG.queue, },
+    "Inventory Service consumer started" 
   );
 };

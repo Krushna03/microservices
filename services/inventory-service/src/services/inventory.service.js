@@ -3,6 +3,7 @@ import crypto from "crypto";
 
 import * as inventoryRepository from "../repositories/inventory.repository.js";
 import * as reservationRepository from "../repositories/reservation.repository.js";
+import logger from "../config/logger.js";
 
 import {
   findProcessedEvent,
@@ -191,9 +192,13 @@ export const reserveInventory = async (event) => {
           error?.isBusinessError
         ) {
 
-          console.warn(
-            `[Inventory Service] Business failure: ${error.message}`
-          );
+          logger.warn({
+            err: error,
+            eventId: event.eventId,
+            eventType: event.eventType,
+            orderId,
+            correlationId: event.correlationId,
+          }, "Inventory reservation business failure");
 
 
           /*

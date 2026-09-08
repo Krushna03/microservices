@@ -1,7 +1,7 @@
 import mongoose from "mongoose";
 import { findProcessedEvent, createProcessedEvent, } from "../repositories/event.repository.js";
 import { processInventoryReserved } from "../services/payment.service.js";
-
+import logger from "../config/logger.js";
 
 const processEvent = async (event, handler) => {
   const session = await mongoose.startSession();
@@ -15,7 +15,13 @@ const processEvent = async (event, handler) => {
       const alreadyProcessed = await findProcessedEvent(event.eventId, session);
 
       if (alreadyProcessed) {
-        console.log(`[Payment Service] Event already processed: ${event.eventId}`);
+        logger.info(
+          {
+            eventId: event.eventId,
+            eventType: event.eventType,
+          },
+          "Payment Service event already processed"
+        );
         result = { alreadyProcessed: true };
         return;
       }
@@ -26,7 +32,13 @@ const processEvent = async (event, handler) => {
       // 3. Mark incoming event as processed
       await createProcessedEvent(event, session);
 
-      console.log(`[Payment Service] Successfully processed event: ${event.eventId}`);
+      logger.info(
+        {
+          eventId: event.eventId,
+          eventType: event.eventType,
+        },
+        "Payment event processed successfully"
+      );
     });
 
     return result;

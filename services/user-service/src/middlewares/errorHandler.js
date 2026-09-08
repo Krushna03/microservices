@@ -3,10 +3,10 @@ import logger from "../config/logger.js";
 export const errorHandler = (error, req, res, next) => {
   logger.error(
     {
-      error: error.message,
-      stack: error.stack,
+      err: error,
       method: req.method,
       url: req.originalUrl,
+      correlationId: req.correlationId,
     },
     "Request failed"
   );
@@ -18,7 +18,7 @@ export const errorHandler = (error, req, res, next) => {
       message: "User with this email already exists",
     });
   }
-  
+
   // Operational/application error
   if (error.isOperational) {
     return res.status(error.statusCode).json({

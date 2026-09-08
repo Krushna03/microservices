@@ -19,13 +19,13 @@ import {
 import {
   RABBITMQ_CONFIG,
 } from "./rabbitmq.config.js";
+import logger from "../config/logger.js";
 
 
 export const startConsumer = async () => {
 
   const channel =
     await connectRabbitMQ();
-
 
   /*
    * Main Exchange
@@ -151,9 +151,12 @@ export const startConsumer = async () => {
       const routingKey =
         message.fields?.routingKey;
 
-
-      console.log(
-        `[Payment Service] Event received: ${routingKey}`
+      logger.info(
+        {
+          routingKey,
+          eventId: headers["x-event-id"],
+        },
+        "Payment Service event received"
       );
 
 
@@ -180,10 +183,7 @@ export const startConsumer = async () => {
        * Unknown Event
        */
 
-      console.warn(
-        `[Payment Service] Unknown routing key: ${routingKey}`
-      );
-
+      logger.warn({ routingKey }, "Payment Service received unknown routing key");
 
       channel.nack(
         message,
@@ -193,8 +193,5 @@ export const startConsumer = async () => {
     }
   );
 
-
-  console.log(
-    "[Payment Service] Consumer started."
-  );
+  logger.info({ queue: RABBITMQ_CONFIG.queue }, "Payment Service consumer started");
 };

@@ -1,0 +1,33 @@
+Our retry lifecycle now
+
+                    writing.events
+                         │
+                         ▼
+                  Inventory Queue
+                         │
+                         ▼
+                 Inventory Service
+                         │
+                    System Error
+                         │
+                         ▼
+              message.processor.js
+                         │
+                         │
+              routingKey = inventory.reserved
+                         │
+                         ▼
+          inventory-service.retry.1000ms
+                         │
+                       TTL
+                         │
+                         ▼
+              retry.dispatcher.js
+                         │
+                         ▼
+                  writing.events
+                         │
+            routingKey = inventory.reserved
+                         │
+                         ▼
+                  Inventory Queue

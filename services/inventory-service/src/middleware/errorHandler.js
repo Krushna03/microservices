@@ -1,4 +1,4 @@
-import logger from "../config/logger.js"
+import logger from "../config/logger.js";
 
 export const errorHandler = (error, req, res, next) => {
   logger.error(
@@ -11,20 +11,15 @@ export const errorHandler = (error, req, res, next) => {
     "Request failed"
   );
 
-  if (error.name === "ValidationError" || error.name === "CastError") {
-    return res.status(400).json({
-      success: false,
-      message: error.message,
-    });
-  }
-
+  // MongoDB duplicate key
   if (error.code === 11000) {
     return res.status(409).json({
       success: false,
-      message: "Duplicate entry error",
+      message: "Resource already exists",
     });
   }
 
+  // Operational/application error
   if (error.isOperational) {
     return res.status(error.statusCode).json({
       success: false,
@@ -32,8 +27,9 @@ export const errorHandler = (error, req, res, next) => {
     });
   }
 
+  // Unexpected error
   return res.status(500).json({
     success: false,
-    message: error.message || "Internal server error",
+    message: "Internal server error",
   });
 };

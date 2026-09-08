@@ -45,6 +45,15 @@ export const processInventoryReserved = async (event, session) => {
   );
 
   if (existingPayment) {
+    logger.info(
+      {
+        orderId,
+        paymentId: existingPayment.paymentId,
+        eventId: event.eventId,
+      },
+      "Payment already exists for order"
+    );
+
     return {
       alreadyExists: true,
       payment: existingPayment,
@@ -74,6 +83,15 @@ export const processInventoryReserved = async (event, session) => {
       status: "pending",
     },
     session
+  );
+
+   logger.info(
+    {
+      orderId,
+      paymentId,
+      amount,
+    },
+    "Pending payment created"
   );
 
   try {
@@ -147,6 +165,17 @@ export const processInventoryReserved = async (event, session) => {
       session
     );
 
+    logger.info(
+      {
+        orderId,
+        paymentId,
+        transactionId:
+          paymentResult.transactionId,
+        eventId: event.eventId,
+      },
+      "Payment completed successfully"
+    );
+
     return {
       success: true,
       orderId,
@@ -208,6 +237,16 @@ export const processInventoryReserved = async (event, session) => {
         session
       );
 
+      logger.warn(
+        {
+          orderId,
+          paymentId,
+          code: error.code,
+          reason: error.message,
+        },
+        "Payment failed due to business rejection"
+      );
+
       return {
         success: false,
         orderId,
@@ -232,6 +271,15 @@ export const processInventoryReserved = async (event, session) => {
      * Throwing causes the MongoDB transaction to rollback.
      * processMessageWithRetry() will then retry the event.
      */
+
+    logger.error(
+      {
+        err: error,
+        orderId,
+        paymentId,
+      },
+      "Payment processing failed due to system error"
+    );
 
     throw error;
   }

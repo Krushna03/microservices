@@ -3,6 +3,7 @@ import { startConsumer } from "./messaging/consumer.js";
 import app from "./app.js";
 import connectDB from "./config/db.js";
 import env from "./config/env.js";
+import logger from "./config/logger.js";
 
 const PORT = env.PORT || 3004;
 
@@ -12,18 +13,22 @@ const startServer = async () => {
 
     try {
       await startConsumer();
-    } catch (rabbitErr) {
-      console.warn("RabbitMQ Connection Failed:", rabbitErr.message);
-      console.warn("Payment Service running (RabbitMQ offline)");
+    }
+    catch (rabbitErr) {
+      logger.warn({ err: rabbitErr.message}, "RabbitMQ Connection Failed. Payment service running with RabbitMQ offline.");
     }
 
     startOutboxWorker();
 
+    logger.info("Payment Service outbox worker started");
+
     app.listen(PORT, () => {
-      console.log(`Payment Service running on port ${PORT}`);
+      logger.info({ PORT }, "Payment Service running");
     });
-  } catch (error) {
-    console.error("Failed to start Payment Service", error);
+
+  }
+  catch (error) {
+    logger.fatal({ err: error }, "Failed to start Payment Service");
     process.exit(1);
   }
 };

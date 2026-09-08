@@ -5,6 +5,7 @@ import app from "./app.js";
 import connectDB from "./config/db.js";
 import { startConsumer } from "./messaging/consumer.js";
 import { startOutboxWorker } from "./workers/outbox.worker.js";
+import logger from "./config/logger.js";
 
 const PORT = process.env.PORT || 3002;
 
@@ -15,23 +16,22 @@ const startServer = async () => {
     try {
       await startConsumer();
     } catch (rabbitErr) {
-      console.warn("RabbitMQ Connection Failed:", rabbitErr.message);
-      console.warn("Order Service running (RabbitMQ offline)");
+      logger.warn({ err: rabbitErr },
+        "RabbitMQ connection failed. Order Service running with RabbitMQ offline"
+      );
     }
 
     startOutboxWorker();
 
     app.listen(PORT, () => {
-      console.log(
-        `Order Service running on port ${PORT}`
-      );
+      logger.info(`Order Service running on port ${PORT}`);
     });
-  } catch (error) {
-    console.error(
-      "Failed to start Order Service",
-      error
-    );
 
+  } 
+  catch (error) {
+    logger.fatal({ err: error },
+      "Failed to start Order Service"
+    );
     process.exit(1);
   }
 };
